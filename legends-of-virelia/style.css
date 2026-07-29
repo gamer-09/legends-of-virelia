@@ -427,11 +427,21 @@ body.theme-colorful .advKey { color: var(--colorful-muted); }
 }
 body.theme-colorful .settingsCard { background: rgba(14,21,32,0.6); border: 1px solid rgba(124,92,255,0.14); border-radius: 12px; }
 .settingsCardTitle { font-weight: 700; color: #fff; font-size: 12px; margin-bottom: 8px; letter-spacing: 0.5px; }
-.settingsOption { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px dotted #1a1a1a; font-size: 12px; }
+.settingsOption { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 10px 0; border-bottom: 1px dotted #1a1a1a; font-size: 12px; }
 body.theme-colorful .settingsOption { border-bottom: 1px solid rgba(124,92,255,0.08); }
 .settingsOption:last-child { border-bottom: none; }
+.settingsOption > div:first-child { flex: 1; min-width: 0; }
+.settingsOption > button,
+.settingsOption > div:last-child > button,
+.settingsCard button {
+  flex-shrink: 0;
+  min-width: 88px;
+  white-space: nowrap;
+  text-align: center;
+  line-height: 1.2;
+}
 .themePreview {
-  width: 100%; height: 60px; border: 1px solid #333; margin-top: 6px; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #666;
+  width: 100%; height: 60px; border: 1px solid #333; margin-top: 8px; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #666;
 }
 body.theme-colorful .themePreview { border-radius: 8px; }
 .themePreview.text { background: #111; color: #888; }
