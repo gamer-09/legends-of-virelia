@@ -7,7 +7,8 @@ console.log('[VIRELIA SETTINGS] Loading...');
 
 const THEMES = {
   text: { label: 'Text Mode (Mono)', desc: 'Original bland terminal, pure words, no colors. For purists.' },
-  colorful: { label: 'Colorful RPG (Vibrant)', desc: 'New design: gradients, glows, colorful badges, RPG feel.' }
+  colorful: { label: 'Colorful RPG (Vibrant)', desc: 'New design: gradients, glows, colorful badges, RPG feel.' },
+  parchment: { label: 'Parchment (Light)', desc: 'Old map scroll: sepia light, ink brown, readable day mode with paper texture.' }
 };
 
 function getSavedTheme() {
@@ -23,8 +24,8 @@ function getSavedTheme() {
 function setTheme(theme, persist) {
   theme = theme || 'colorful';
   if (!THEMES[theme]) theme = 'colorful';
-  // Apply to body
-  document.body.classList.remove('theme-text', 'theme-colorful');
+  // Apply to body - support 3 themes
+  document.body.classList.remove('theme-text', 'theme-colorful', 'theme-parchment');
   document.body.classList.add('theme-' + theme);
   // Save
   if (persist !== false) {
@@ -308,7 +309,7 @@ function fixDesignButton() {
   if (!btn) return;
   // Rename
   btn.textContent = '[ SETTINGS ]';
-  btn.title = 'Open settings: switch Text vs Colorful theme, diagnostics';
+  btn.title = 'Open settings: switch Text vs Colorful vs Parchment themes, diagnostics';
   // Remove old listeners by cloning
   const newBtn = btn.cloneNode(true);
   btn.parentNode.replaceChild(newBtn, btn);
@@ -326,9 +327,58 @@ function fixDesignButton() {
       original();
       const b = document.getElementById('btnDesign');
       if (b) b.disabled = false;
+      const lb = document.getElementById('btnLogout');
+      if (lb) lb.disabled = false;
     };
     try { syncSidebarButtons = window.syncSidebarButtons; } catch {}
   }
+}
+
+function logoutNormalUser() {
+  // Similar to admin logout but for normal users
+  try {
+    if (typeof worldTick === 'function') worldTick('Logout');
+  } catch {}
+  // Save current if exists?
+  if (state && typeof autoSave === 'function') {
+    try { autoSave(); } catch {}
+  }
+  // Clear state
+  state = null;
+  // Clear UI panels
+  try {
+    if (typeof outputEl !== 'undefined' && outputEl) outputEl.innerHTML = '';
+    if (typeof choicesEl !== 'undefined' && choicesEl) choicesEl.innerHTML = '';
+    if (typeof statsEl !== 'undefined' && statsEl) statsEl.innerHTML = '';
+    if (typeof questListEl !== 'undefined' && questListEl) questListEl.innerHTML = '';
+    if (typeof renderEffectsUi === 'function') renderEffectsUi();
+  } catch {}
+  // Reset admin flags
+  if (typeof adminMode !== 'undefined') adminMode = false;
+  if (typeof adminEditingProfile !== 'undefined') adminEditingProfile = null;
+  if (typeof adminShowGame !== 'undefined') adminShowGame = true;
+  const adminPassEl = document.getElementById('adminPass');
+  if (adminPassEl) adminPassEl.value = '';
+  if (typeof setAdminDashboardUi === 'function') setAdminDashboardUi();
+  if (typeof renderHomeSaves === 'function') renderHomeSaves();
+  if (typeof setHomeMsg === 'function') setHomeMsg('Logged out. Enter profile name to Continue or Start New.');
+  // Scroll to top/home
+  const homeEl = document.getElementById('home');
+  if (homeEl) homeEl.scrollIntoView({ behavior: 'smooth' });
+  const profileNameEl = document.getElementById('profileName');
+  if (profileNameEl) profileNameEl.focus();
+}
+
+function fixLogoutButton() {
+  const btn = document.getElementById('btnLogout');
+  if (!btn) return;
+  btn.textContent = '[ LOGOUT ]';
+  btn.title = 'Logout current profile, save, return to home screen';
+  const newBtn = btn.cloneNode(true);
+  btn.parentNode.replaceChild(newBtn, btn);
+  newBtn.addEventListener('click', () => {
+    logoutNormalUser();
+  });
 }
 
 // Also fix admin sanity button - enhance its behavior
@@ -375,6 +425,7 @@ function initSettings() {
   setTimeout(() => {
     fixDesignButton();
     fixSanityButton();
+    fixLogoutButton();
   }, 500);
   // Also re-fix after home saves render (which recreates admin tools)
   const origRenderHomeSaves = typeof renderHomeSaves === 'function' ? renderHomeSaves : null;
@@ -383,6 +434,7 @@ function initSettings() {
       origRenderHomeSaves();
       fixDesignButton();
       fixSanityButton();
+      fixLogoutButton();
     };
     try { renderHomeSaves = window.renderHomeSaves; } catch {}
   }
