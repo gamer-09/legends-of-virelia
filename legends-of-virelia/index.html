@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Legends of Virelia</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3CradialGradient id='g' cx='30%25' cy='25%25' r='80%25'%3E%3Cstop offset='0%25' stop-color='%23ffd36b'/%3E%3Cstop offset='55%25' stop-color='%23ff8a2b'/%3E%3Cstop offset='100%25' stop-color='%23b31d3b'/%3E%3C/radialGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='14' fill='%230e1520'/%3E%3Cpath d='M18 46c12-4 18-14 22-27 6 9 6 22-2 30-7 7-15 8-20 7z' fill='url(%23g)'/%3E%3Cpath d='M40 18c3 8 1 16-6 23' fill='none' stroke='%23ffd36b' stroke-width='4' stroke-linecap='round'/%3E%3Ccircle cx='44' cy='18' r='3' fill='%23ffd36b'/%3E%3C/svg%3E" />
+<link rel="stylesheet" href="style.css?v=2026-01-20u">
+</head>
+<body>
+<div class="app">
+  <header class="header">
+    <h1 class="brandTitle"><svg class="brandIcon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" aria-hidden="true"><defs><radialGradient id="g" cx="30%" cy="25%" r="80%"><stop offset="0%" stop-color="#ffd36b"/><stop offset="55%" stop-color="#ff8a2b"/><stop offset="100%" stop-color="#b31d3b"/></radialGradient></defs><rect width="64" height="64" rx="14" fill="#0e1520"/><path d="M18 46c12-4 18-14 22-27 6 9 6 22-2 30-7 7-15 8-20 7z" fill="url(#g)"/><path d="M40 18c3 8 1 16-6 23" fill="none" stroke="#ffd36b" stroke-width="4" stroke-linecap="round"/><circle cx="44" cy="18" r="3" fill="#ffd36b"/></svg><span class="brandText">Legends of Virelia</span></h1>
+    <div class="sub">A browser-based text RPG with branching choices, missions, and side quests.</div>
+  </header>
+
+  <section id="home" class="card">
+    <div id="userHomeView">
+      <div class="row">
+        <input id="profileName" placeholder="Enter a profile name (e.g. Samuel)">
+        <input id="adminPass" type="password" placeholder="Admin password (only for admin#)">
+        <button id="btnNew">Start New</button>
+        <button id="btnContinue" class="secondary">Continue</button>
+        <button id="btnReset" class="danger">Reset Save</button>
+      </div>
+    </div>
+
+    <div id="adminHomeView" style="display:none;">
+      <div class="row">
+        <div class="panelTitle">Admin Dashboard</div>
+        <button id="btnAdminToggleGame" class="secondary">Show Game</button>
+        <button id="btnAdminLogout" class="secondary">Logout Admin</button>
+      </div>
+      <div class="hint">Logged in as admin#. You can edit saves and manage items/stats here.</div>
+      <div class="row" style="margin-top:10px;">
+        <input id="adminNewUser" placeholder="Create user profile (e.g. samuel2)">
+        <button id="btnAdminCreateUser">Create User Save</button>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <button id="btnPurgeNonAdmin" class="danger">Delete All Saves (Except admin#)</button>
+      </div>
+    </div>
+
+    <div id="homeMsg" class="hint"></div>
+    <div id="homeSavesTitleUser" class="panelTitle" style="margin-top:14px;">Available Saves</div>
+    <div id="homeSavesTitleAdmin" class="panelTitle" style="margin-top:14px; display:none;">All Saves (Admin)</div>
+    <div id="homeSaves" class="saveList"></div>
+    <div id="adminTools" style="margin-top:14px;"></div>
+  </section>
+
+  <main class="layout" id="gameMain">
+    <section class="card" id="statsPanel">
+      <div class="panelTitle">Adventurer</div>
+      <div id="stats"></div>
+      <div class="row">
+        <button id="btnRest" class="secondary">Rest</button>
+        <button id="btnStatus" class="secondary">Status</button>
+        <button id="btnInventory" class="secondary">Inventory</button>
+        <button id="btnSkills" class="secondary">Skills</button>
+        <button id="btnParty" class="secondary">Party</button>
+        <button id="btnAchievements" class="secondary">Achievements</button>
+        <button id="btnDesign" class="secondary">Design</button>
+        <button id="btnSave" class="secondary">Save</button>
+      </div>
+    </section>
+
+    <section class="card" id="storyPanel">
+      <div class="panelTitle">Story</div>
+      <div id="output" class="output"></div>
+      <div id="choices" class="choices"></div>
+    </section>
+
+    <section class="card" id="questsPanel">
+      <div class="panelTitle">Quest Board</div>
+      <div class="tabs">
+        <button id="tabMissions" class="tab active">Missions</button>
+        <button id="tabSideQuests" class="tab">Side Quests</button>
+      </div>
+      <div id="questList" class="questList"></div>
+      <div class="row" id="questPager">
+        <button id="btnPrevQuest" class="secondary">Prev</button>
+        <div id="questPageInfo" class="hint"></div>
+        <button id="btnNextQuest" class="secondary">Next</button>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div id="fxOverlay" class="fxOverlay" aria-hidden="true">
+  <div class="fxLayer hit"></div>
+  <div class="fxLayer bleeding"></div>
+  <div class="fxLayer rested"></div>
+  <div class="fxLayer cursed"></div>
+  <div class="fxLayer poisoned"></div>
+  <div class="fxLayer shielded"></div>
+ </div>
+<div id="fxBadges" class="fxBadges" aria-hidden="true"></div>
+
+<script src="game.part1.js?v=2026-01-20u"></script>
+<script src="game.part2.js?v=2026-01-21h"></script>
+<script src="game.part3.js?v=2026-01-21d"></script>
+<script src="game.part4.js?v=2026-01-20u"></script>
+<script src="game.part5.js?v=2026-01-21h"></script>
+</body>
+</html>
