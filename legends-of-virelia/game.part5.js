@@ -1,4 +1,4 @@
-﻿function statValue(s, key) {
+function statValue(s, key) {
   if (!s || !s.stats) return 0;
   const k = String(key || "").trim();
   if (!k) return 0;
@@ -1133,7 +1133,33 @@ const STORY = {
           state.gold = Math.max(0, state.gold - 20);
           state.hp = Math.max(1, Math.floor(playerMaxHp() * 0.6));
           state.mana = Math.min(playerMaxMana(), state.mana + 10);
-          appendLog("A priest takes a donation and leaves you with water.");
+          // FIX: clear all lingering detrimental effects on resurrection
+          // Previously bleeding/poisoned/cursed persisted after death
+          try {
+            clearEffect("bleeding");
+            clearEffect("poisoned");
+            clearEffect("cursed");
+            clearEffect("aether");
+            // Clear any other effect that could kill again immediately
+            if (state.effects) {
+              // Keep rested if you want, but clear others
+              const toClear = Object.keys(state.effects).filter(k => !["rested","shielded"].includes(k));
+              for (const k of toClear) clearEffect(k);
+            }
+            addEffect("rested", 30000);
+          } catch(e) {}
+          appendLog("A priest takes a donation and leaves you with water. The ailments of your fall fade.");
+          // Also heal companions partially so they don't stay dead with effects?
+          if (state.party && Array.isArray(state.party.members)) {
+            for (const m of state.party.members) {
+              if (!m) continue;
+              // Revive companions at 25% if dead, and clear their debuffs if any (companions don't store effects, but hp)
+              if ((m.hp||0) <= 0) {
+                m.hp = Math.max(1, Math.floor((m.maxHp||1)*0.25));
+                m.mana = Math.max(0, Math.floor((m.maxMana||0)*0.25));
+              }
+            }
+          }
         },
       },
       {

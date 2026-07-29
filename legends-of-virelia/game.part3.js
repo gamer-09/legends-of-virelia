@@ -1,4 +1,4 @@
-﻿const ADMIN_DELETED_FLAG = `virelia_admin_deleted:${ADMIN_PROFILE}`;
+const ADMIN_DELETED_FLAG = `virelia_admin_deleted:${ADMIN_PROFILE}`;
 const LEGACY_ADMIN_PROFILE = "admin@";
 const LEGACY_ADMIN_MIGRATED_FLAG = "virelia_admin_migrated_admin_at";
 
@@ -1464,6 +1464,18 @@ function handleCrossroadsSiegeDefeat(ev) {
   const maxMana = playerMaxMana();
   state.hp = Math.max(1, Math.min(maxHp, Math.floor(maxHp * 0.55)));
   state.mana = Math.max(0, Math.min(maxMana, Math.floor(maxMana * 0.55)));
+  // FIX: clear lingering negative effects on exile resurrect - bleeding etc should not persist
+  try {
+    clearEffect("bleeding");
+    clearEffect("poisoned");
+    clearEffect("cursed");
+    if (state.effects) {
+      const keep = ["rested","shielded"];
+      const toClear = Object.keys(state.effects).filter(k => keep.indexOf(k) === -1);
+      for (let i=0;i<toClear.length;i++) clearEffect(toClear[i]);
+    }
+    addEffect("rested", 30000);
+  } catch(e) {}
   if (state.party && Array.isArray(state.party.members)) {
     for (const m of state.party.members) {
       if (!m) continue;
