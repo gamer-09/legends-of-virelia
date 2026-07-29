@@ -10,7 +10,7 @@
 <div class="app">
   <header>
     <h1>LEGENDS OF VIRELIA</h1>
-    <div class="sub">TEXT ADVENTURE // NO GRAPHICS // JUST WORDS</div>
+    <div class="sub">TEXT ADVENTURE // NO GRAPHICS // JUST WORDS // FX v2</div>
     <div class="sub small">A browser-based text RPG with branching choices, missions, and side quests.</div>
   </header>
 
@@ -88,14 +88,21 @@
 
   <footer>
     <div class="footer-line">------------------------------------------------------------</div>
-    <div>LEGENDS OF VIRELIA // TEXT MODE v2.0 // NO GRAPHICS, NO ANIMATIONS, JUST WORDS</div>
-    <div class="hint">Saving is done via browser storage. Use SAVE often.</div>
+    <div>LEGENDS OF VIRELIA // TEXT MODE v2.1 // FX + POPUPS RESTORED // MONO</div>
+    <div class="hint">Saving is done via browser storage. Use [ SAVE ] often. Effects: HIT, BLEED, REST, CURSE, POISON, SHIELD</div>
   </footer>
 </div>
 
-<!-- Text mode: fx layers removed but kept as empty for JS compatibility (hidden via CSS) -->
-<div id="fxOverlay" style="display:none"></div>
-<div id="fxBadges" style="display:none"></div>
+<!-- FX Layers - Text Mode Enhanced -->
+<div id="fxOverlay" class="fxOverlay" aria-hidden="true">
+  <div class="fxLayer hit"></div>
+  <div class="fxLayer bleeding"></div>
+  <div class="fxLayer rested"></div>
+  <div class="fxLayer cursed"></div>
+  <div class="fxLayer poisoned"></div>
+  <div class="fxLayer shielded"></div>
+</div>
+<div id="fxBadges" class="fxBadges" aria-hidden="true"></div>
 
 <script src="game.part1.js"></script>
 <script src="game.part2.js"></script>
