@@ -3,103 +3,104 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Legends of Virelia</title>
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3CradialGradient id='g' cx='30%25' cy='25%25' r='80%25'%3E%3Cstop offset='0%25' stop-color='%23ffd36b'/%3E%3Cstop offset='55%25' stop-color='%23ff8a2b'/%3E%3Cstop offset='100%25' stop-color='%23b31d3b'/%3E%3C/radialGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='14' fill='%230e1520'/%3E%3Cpath d='M18 46c12-4 18-14 22-27 6 9 6 22-2 30-7 7-15 8-20 7z' fill='url(%23g)'/%3E%3Cpath d='M40 18c3 8 1 16-6 23' fill='none' stroke='%23ffd36b' stroke-width='4' stroke-linecap='round'/%3E%3Ccircle cx='44' cy='18' r='3' fill='%23ffd36b'/%3E%3C/svg%3E" />
-<link rel="stylesheet" href="style.css?v=2026-01-20u">
+<title>Legends of Virelia - Text Only</title>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
 <div class="app">
-  <header class="header">
-    <h1 class="brandTitle"><svg class="brandIcon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" aria-hidden="true"><defs><radialGradient id="g" cx="30%" cy="25%" r="80%"><stop offset="0%" stop-color="#ffd36b"/><stop offset="55%" stop-color="#ff8a2b"/><stop offset="100%" stop-color="#b31d3b"/></radialGradient></defs><rect width="64" height="64" rx="14" fill="#0e1520"/><path d="M18 46c12-4 18-14 22-27 6 9 6 22-2 30-7 7-15 8-20 7z" fill="url(#g)"/><path d="M40 18c3 8 1 16-6 23" fill="none" stroke="#ffd36b" stroke-width="4" stroke-linecap="round"/><circle cx="44" cy="18" r="3" fill="#ffd36b"/></svg><span class="brandText">Legends of Virelia</span></h1>
-    <div class="sub">A browser-based text RPG with branching choices, missions, and side quests.</div>
+  <header>
+    <h1>LEGENDS OF VIRELIA</h1>
+    <div class="sub">TEXT ADVENTURE // NO GRAPHICS // JUST WORDS</div>
+    <div class="sub small">A browser-based text RPG with branching choices, missions, and side quests.</div>
   </header>
 
-  <section id="home" class="card">
+  <section id="home">
     <div id="userHomeView">
+      <div class="line-prompt">&gt; ENTER PROFILE NAME:</div>
       <div class="row">
-        <input id="profileName" placeholder="Enter a profile name (e.g. Samuel)">
-        <input id="adminPass" type="password" placeholder="Admin password (only for admin#)">
-        <button id="btnNew">Start New</button>
-        <button id="btnContinue" class="secondary">Continue</button>
-        <button id="btnReset" class="danger">Reset Save</button>
+        <input id="profileName" placeholder="profile name (e.g. samuel)">
+        <input id="adminPass" type="password" placeholder="admin password (admin# only)">
+        <button id="btnNew">[ NEW GAME ]</button>
+        <button id="btnContinue" class="secondary">[ CONTINUE ]</button>
+        <button id="btnReset" class="danger">[ RESET SAVE ]</button>
       </div>
     </div>
 
     <div id="adminHomeView" style="display:none;">
       <div class="row">
-        <div class="panelTitle">Admin Dashboard</div>
-        <button id="btnAdminToggleGame" class="secondary">Show Game</button>
-        <button id="btnAdminLogout" class="secondary">Logout Admin</button>
+        <div class="section-title">[ ADMIN DASHBOARD ]</div>
+        <button id="btnAdminToggleGame" class="secondary">[ SHOW GAME ]</button>
+        <button id="btnAdminLogout" class="secondary">[ LOGOUT ]</button>
       </div>
-      <div class="hint">Logged in as admin#. You can edit saves and manage items/stats here.</div>
+      <div class="hint">Logged in as admin#. You can edit saves and manage items/stats.</div>
       <div class="row" style="margin-top:10px;">
-        <input id="adminNewUser" placeholder="Create user profile (e.g. samuel2)">
-        <button id="btnAdminCreateUser">Create User Save</button>
+        <input id="adminNewUser" placeholder="create user profile (e.g. samuel2)">
+        <button id="btnAdminCreateUser">[ CREATE USER SAVE ]</button>
       </div>
       <div class="row" style="margin-top:10px;">
-        <button id="btnPurgeNonAdmin" class="danger">Delete All Saves (Except admin#)</button>
+        <button id="btnPurgeNonAdmin" class="danger">[ DELETE ALL SAVES EXCEPT admin# ]</button>
       </div>
     </div>
 
     <div id="homeMsg" class="hint"></div>
-    <div id="homeSavesTitleUser" class="panelTitle" style="margin-top:14px;">Available Saves</div>
-    <div id="homeSavesTitleAdmin" class="panelTitle" style="margin-top:14px; display:none;">All Saves (Admin)</div>
+    <div id="homeSavesTitleUser" class="section-title">-- AVAILABLE SAVES --</div>
+    <div id="homeSavesTitleAdmin" class="section-title" style="display:none;">-- ALL SAVES (ADMIN) --</div>
     <div id="homeSaves" class="saveList"></div>
     <div id="adminTools" style="margin-top:14px;"></div>
   </section>
 
   <main class="layout" id="gameMain">
-    <section class="card" id="statsPanel">
-      <div class="panelTitle">Adventurer</div>
+    <section id="statsPanel">
+      <div class="section-title">-- ADVENTURER --</div>
       <div id="stats"></div>
-      <div class="row">
-        <button id="btnRest" class="secondary">Rest</button>
-        <button id="btnStatus" class="secondary">Status</button>
-        <button id="btnInventory" class="secondary">Inventory</button>
-        <button id="btnSkills" class="secondary">Skills</button>
-        <button id="btnParty" class="secondary">Party</button>
-        <button id="btnAchievements" class="secondary">Achievements</button>
-        <button id="btnDesign" class="secondary">Design</button>
-        <button id="btnSave" class="secondary">Save</button>
+      <div class="row menu-row">
+        <button id="btnRest">[ REST ]</button>
+        <button id="btnStatus">[ STATUS ]</button>
+        <button id="btnInventory">[ INVENTORY ]</button>
+        <button id="btnSkills">[ SKILLS ]</button>
+        <button id="btnParty">[ PARTY ]</button>
+        <button id="btnAchievements">[ ACHIEVEMENTS ]</button>
+        <button id="btnDesign">[ DESIGN ]</button>
+        <button id="btnSave">[ SAVE ]</button>
       </div>
     </section>
 
-    <section class="card" id="storyPanel">
-      <div class="panelTitle">Story</div>
+    <section id="storyPanel">
+      <div class="section-title">-- STORY --</div>
       <div id="output" class="output"></div>
       <div id="choices" class="choices"></div>
     </section>
 
-    <section class="card" id="questsPanel">
-      <div class="panelTitle">Quest Board</div>
+    <section id="questsPanel">
+      <div class="section-title">-- QUEST BOARD --</div>
       <div class="tabs">
-        <button id="tabMissions" class="tab active">Missions</button>
-        <button id="tabSideQuests" class="tab">Side Quests</button>
+        <button id="tabMissions" class="tab active">&gt; MISSIONS</button>
+        <button id="tabSideQuests" class="tab">&gt; SIDE QUESTS</button>
       </div>
       <div id="questList" class="questList"></div>
       <div class="row" id="questPager">
-        <button id="btnPrevQuest" class="secondary">Prev</button>
+        <button id="btnPrevQuest">[ PREV ]</button>
         <div id="questPageInfo" class="hint"></div>
-        <button id="btnNextQuest" class="secondary">Next</button>
+        <button id="btnNextQuest">[ NEXT ]</button>
       </div>
     </section>
   </main>
+
+  <footer>
+    <div class="footer-line">------------------------------------------------------------</div>
+    <div>LEGENDS OF VIRELIA // TEXT MODE v2.0 // NO GRAPHICS, NO ANIMATIONS, JUST WORDS</div>
+    <div class="hint">Saving is done via browser storage. Use SAVE often.</div>
+  </footer>
 </div>
 
-<div id="fxOverlay" class="fxOverlay" aria-hidden="true">
-  <div class="fxLayer hit"></div>
-  <div class="fxLayer bleeding"></div>
-  <div class="fxLayer rested"></div>
-  <div class="fxLayer cursed"></div>
-  <div class="fxLayer poisoned"></div>
-  <div class="fxLayer shielded"></div>
- </div>
-<div id="fxBadges" class="fxBadges" aria-hidden="true"></div>
+<!-- Text mode: fx layers removed but kept as empty for JS compatibility (hidden via CSS) -->
+<div id="fxOverlay" style="display:none"></div>
+<div id="fxBadges" style="display:none"></div>
 
-<script src="game.part1.js?v=2026-01-20u"></script>
-<script src="game.part2.js?v=2026-01-21h"></script>
-<script src="game.part3.js?v=2026-01-21d"></script>
-<script src="game.part4.js?v=2026-01-20u"></script>
-<script src="game.part5.js?v=2026-01-21h"></script>
+<script src="game.part1.js"></script>
+<script src="game.part2.js"></script>
+<script src="game.part3.js"></script>
+<script src="game.part4.js"></script>
+<script src="game.part5.js"></script>
 </body>
 </html>
