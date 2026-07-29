@@ -12,7 +12,7 @@ body {
 }
 
 .app {
-  max-width: 850px;
+  max-width: 1280px;
   margin: 0 auto;
   position: relative;
 }
@@ -50,14 +50,54 @@ header h1 {
 }
 .line-prompt { color: #8f8f8f; margin-bottom: 6px; font-size: 12px; }
 
-#home, #statsPanel, #storyPanel, #questsPanel {
+#home {
   border: 1px solid #2a2a2a;
   background: #111111;
   padding: 14px;
   margin-bottom: 16px;
   position: relative;
 }
-.layout { display: flex; flex-direction: column; gap: 16px; }
+
+#statsPanel, #storyPanel, #questsPanel {
+  border: 1px solid #2a2a2a;
+  background: #111111;
+  padding: 14px;
+  position: relative;
+  /* for side-by-side */
+  min-height: 200px;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: 280px 1fr 340px;
+  grid-template-areas: "stats story quests";
+  gap: 12px;
+  align-items: start;
+}
+
+#statsPanel { grid-area: stats; position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; }
+#storyPanel { grid-area: story; }
+#questsPanel { grid-area: quests; position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; }
+
+@media (max-width: 1120px) {
+  .layout {
+    grid-template-columns: 300px 1fr;
+    grid-template-areas: 
+      "stats story"
+      "quests quests";
+  }
+  #questsPanel { position: static; max-height: 500px; }
+  #statsPanel { max-height: 70vh; }
+}
+
+@media (max-width: 760px) {
+  body { padding: 10px; }
+  .layout {
+    grid-template-columns: 1fr;
+    grid-template-areas: "stats" "story" "quests";
+  }
+  #statsPanel, #questsPanel { position: static; max-height: none; }
+}
 .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
 .menu-row { border-top: 1px dashed #222; padding-top: 10px; margin-top: 10px; }
 
@@ -100,8 +140,8 @@ button.tab.active { background: #fff; color: #000; border-style: solid; border-c
 
 /* OUTPUT */
 .output {
-  min-height: 380px;
-  max-height: 560px;
+  min-height: 520px;
+  max-height: 62vh;
   overflow-y: auto;
   padding: 12px;
   background: #070707;
@@ -139,7 +179,7 @@ button.tab.active { background: #fff; color: #000; border-style: solid; border-c
 #stats .v { color: #ddd; font-weight: 600; }
 
 /* QUESTS */
-.questList { max-height: 380px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+.questList { max-height: 48vh; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
 .questItem { background: #0c0c0c; border: 1px solid #2a2a2a; padding: 8px 10px; font-size: 12.5px; transition: border-color 0.1s; }
 .questItem:hover { border-color: #666; }
 .questTop { display: flex; justify-content: space-between; gap: 10px; }
