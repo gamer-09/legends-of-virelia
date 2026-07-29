@@ -413,6 +413,14 @@ function ensureV2Roam(s) {
 function roamActV2(s, kind) {
   if (!s) return;
   normalizeState(s);
+  if (typeof isCombatActive === 'function' && isCombatActive(s)) {
+    appendLog("You can't rest during combat.");
+    return;
+  }
+  if (typeof hasEffectOnState === 'function' && hasEffectOnState(s, 'rested')) {
+    appendLog("You aren't ready to rest again yet. (Rested cooldown active)");
+    return;
+  }
   const v2 = ensureV2Roam(s);
   const area = V2_AREAS[v2.current] || V2_AREAS.streets;
   if (kind === 'rest') {
@@ -422,12 +430,24 @@ function roamActV2(s, kind) {
     }
     v2.risk = Math.max(0, v2.risk - 25);
     s.hp = Math.min(playerMaxHp(), (s.hp||0) + 3);
-    appendLog('Rest in ' + area.label + ' (+3 HP). Risk lowered.');
+    if (s.party && Array.isArray(s.party.members)) {
+      for (let i=0; i<s.party.members.length; i++) {
+        const m = s.party.members[i];
+        if (!m) continue;
+        const h = Math.max(1, Math.floor((m.maxHp||1)*0.25));
+        m.hp = Math.min(m.maxHp||1, (m.hp||0)+h);
+      }
+    }
+    s.mana = Math.min(playerMaxMana(), (s.mana||0)+2);
+    appendLog('Rest in ' + area.label + ' (+3 HP, +2 mana, party +25%). Risk lowered.');
     if (area.label.indexOf('Ruins') >=0 && s.inventory && s.inventory.hollow_child_doll) {
       appendLog('Doll whispers: You left before. +1 mana +1 plague');
       s.mana = Math.min(playerMaxMana(), (s.mana||0)+1);
       ConsequenceEngine.worldState(s).plague++;
     }
+    if (typeof addEffect === 'function') addEffect('rested', 30000);
+    if (typeof autoSave === 'function') autoSave();
+    if (typeof render === 'function') render();
     return;
   }
   if (kind === 'forage') {

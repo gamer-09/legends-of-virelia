@@ -1,4 +1,4 @@
-﻿let hitFxTimer = null;
+let hitFxTimer = null;
 let shakeFxTimer = null;
 
 let audioCtx = null;
@@ -1722,6 +1722,14 @@ function roamMaybeSkillTrader(s) {
 function roamAct(s, kind) {
   if (!s) return;
   normalizeState(s);
+  if (typeof isCombatActive === 'function' && isCombatActive(s)) {
+    appendLog("You can't rest during combat.");
+    return;
+  }
+  if (typeof hasEffectOnState === 'function' && hasEffectOnState(s, "rested")) {
+    appendLog("You aren't ready to rest again yet. (Rested cooldown active)");
+    return;
+  }
   const roam = ensureRoamState(s);
   const area = roamAreaDef(roam.areaKey);
   roam.steps += 1;
@@ -1729,7 +1737,11 @@ function roamAct(s, kind) {
   if (kind === "rest") {
     roam.risk = clamp(roam.risk - 30, 0, 100);
     s.hp = Math.min(s.maxHp || 1, (s.hp || 0) + 2);
-    appendLog("You slow your breathing and let the noise pass. (+2 HP)");
+    s.mana = Math.min(typeof playerMaxMana === 'function' ? playerMaxMana() : (s.maxMana||0), (s.mana||0)+1);
+    appendLog("You slow your breathing and let the noise pass. (+2 HP, +1 mana)");
+    if (typeof addEffect === 'function') addEffect("rested", 30000);
+    if (typeof autoSave === 'function') autoSave();
+    if (typeof render === 'function') render();
     return;
   }
 
@@ -1850,6 +1862,14 @@ function destinationFoundFlag(def) {
 function destinationAct(s, def, kind) {
   if (!s || !def) return;
   normalizeState(s);
+  if (typeof isCombatActive === 'function' && isCombatActive(s)) {
+    appendLog("You can't rest during combat.");
+    return;
+  }
+  if (typeof hasEffectOnState === 'function' && hasEffectOnState(s, "rested")) {
+    appendLog("You aren't ready to rest again yet. (Rested cooldown active)");
+    return;
+  }
   const msgA = [
     `A door closes somewhere behind you in ${def.name}.`,
     `A pair of eyes track you from the edge of ${def.name}.`,
@@ -1865,7 +1885,11 @@ function destinationAct(s, def, kind) {
 
   if (kind === "rest") {
     s.hp = Math.min(s.maxHp || 1, (s.hp || 0) + 2);
-    appendLog("You take a breath and let the crowd swallow your presence. (+2 HP)");
+    s.mana = Math.min(typeof playerMaxMana === 'function' ? playerMaxMana() : (s.maxMana||0), (s.mana||0)+1);
+    appendLog("You take a breath and let the crowd swallow your presence. (+2 HP, +1 mana)");
+    if (typeof addEffect === 'function') addEffect("rested", 30000);
+    if (typeof autoSave === 'function') autoSave();
+    if (typeof render === 'function') render();
     return;
   }
 
