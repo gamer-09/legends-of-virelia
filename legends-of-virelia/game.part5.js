@@ -1179,12 +1179,35 @@ const STORY = {
 registerDestinations();
 
 let questRankFilter = "all";
+let marketRankFilter = "all";
+let marketRankSelectEl = null;
+
+function getQuestBoardElements() {
+  return {
+    title: document.getElementById('questBoardTitle'),
+    tabs: document.getElementById('questBoardTabs')
+  };
+}
+
+function updateQuestBoardTitle() {
+  const els = getQuestBoardElements();
+  const isMarket = !!(state && (state.nodeId || "") === "market");
+  if (els.title) {
+    els.title.textContent = isMarket ? "-- SHOP BOARD --" : "-- QUEST BOARD --";
+  }
+  if (els.tabs) {
+    els.tabs.style.display = isMarket ? "none" : "flex";
+  }
+}
 
 function renderQuestList() {
   if (!state) {
     questListEl.innerHTML = "";
     return;
   }
+
+  // Update board title: Quest Board vs Shop Board
+  if (typeof updateQuestBoardTitle === 'function') updateQuestBoardTitle();
 
   if ((state.nodeId || "") === "market") {
     renderMarketList();
@@ -1332,6 +1355,7 @@ function ensureMarketSearchUi() {
     marketSearchWrapEl = null;
     marketSearchInputEl = null;
     marketSearchResultsEl = null;
+    marketRankSelectEl = null;
   }
   if (marketSearchWrapEl) return;
 
@@ -1344,6 +1368,7 @@ function ensureMarketSearchUi() {
 
   const row = document.createElement("div");
   row.className = "row";
+  row.style.alignItems = "center";
 
   marketSearchInputEl = document.createElement("input");
   marketSearchInputEl.placeholder = "Search items...";
@@ -1361,7 +1386,39 @@ function ensureMarketSearchUi() {
     }, 90);
   });
 
+  // Rank filter for shop
+  const rankLabel = document.createElement("div");
+  rankLabel.className = "hint";
+  rankLabel.textContent = "Rank";
+  rankLabel.style.marginLeft = "8px";
+
+  marketRankSelectEl = document.createElement("select");
+  const rankOpts = [
+    { v: "all", t: "All Ranks" },
+    { v: "common", t: "Common" },
+    { v: "uncommon", t: "Uncommon" },
+    { v: "rare", t: "Rare" },
+    { v: "epic", t: "Epic" },
+    { v: "legendary", t: "Legendary" },
+    { v: "curio", t: "Curio" }
+  ];
+  for (const o of rankOpts) {
+    const opt = document.createElement("option");
+    opt.value = o.v;
+    opt.textContent = o.t;
+    marketRankSelectEl.appendChild(opt);
+  }
+  marketRankSelectEl.value = String(marketRankFilter || "all");
+  marketRankSelectEl.style.minWidth = "120px";
+  marketRankSelectEl.addEventListener("change", () => {
+    marketRankFilter = String(marketRankSelectEl.value || "all");
+    marketPage = 0;
+    renderMarketList();
+  });
+
   row.appendChild(marketSearchInputEl);
+  row.appendChild(rankLabel);
+  row.appendChild(marketRankSelectEl);
   marketSearchWrapEl.appendChild(row);
 
   marketSearchResultsEl = document.createElement("div");
@@ -1377,21 +1434,38 @@ function renderMarketList() {
   if (!state) return;
   normalizeState(state);
 
+  // Ensure board title is Shop Board when in market
+  if (typeof updateQuestBoardTitle === 'function') updateQuestBoardTitle();
+
   ensureMarketSearchUi();
   if (!marketSearchResultsEl) return;
+  if (marketRankSelectEl) marketRankSelectEl.value = String(marketRankFilter || "all");
   marketSearchResultsEl.innerHTML = "";
 
   const allKeys = marketStockKeys();
+
+  // Filter by rank first
+  const rf = String(marketRankFilter || "all").toLowerCase();
+  let rankFiltered = allKeys;
+  if (rf && rf !== "all") {
+    rankFiltered = allKeys.filter((k) => {
+      try {
+        const r = marketRankForItem(k);
+        return String(r.rank || "").toLowerCase() === rf;
+      } catch { return false; }
+    });
+  }
+
   const q = String(marketSearchQuery || "").trim().toLowerCase();
   const keys = q
-    ? allKeys.filter((k) => {
+    ? rankFiltered.filter((k) => {
       const kk = String(k || "").toLowerCase();
       if (!kk) return false;
       if (kk.includes(q)) return true;
       const label = String(itemLabel(k) || "").toLowerCase();
       return label.includes(q);
     })
-    : allKeys;
+    : rankFiltered;
 
   const total = keys.length;
   const maxPage = Math.max(0, Math.ceil(total / MARKET_ITEMS_PER_PAGE) - 1);
