@@ -2499,7 +2499,6 @@ function renderAdminTools() {
     const durSec = parseFloat(effectDurInput.value || "15");
     const durMs = Math.max(1000, Math.floor((isFinite(durSec) ? durSec : 15) * 1000));
     const allProfiles = (typeof listSaveProfiles === 'function') ? listSaveProfiles() : [];
-    const isPermAll = effectPermCheck.checked;
     for (const prof of allProfiles) {
       if (prof === ADMIN_PROFILE) continue;
       stageEffectChange(prof, (staged) => {
