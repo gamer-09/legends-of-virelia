@@ -410,6 +410,51 @@ function ensureV2Roam(s) {
   return s.roam.v2;
 }
 
+
+function maybeApplyDebuffFromSituation(s, situation) {
+  if (!s || typeof addEffect !== 'function') return;
+  if (isAdminProfile && isAdminProfile(s.profile)) return; // admin immune
+  const roll = Math.random();
+  // Each situation has chance to apply specific debuffs
+  if (situation === "ruins_no_torch") {
+    if (roll < 0.35) { addEffect("frostbitten", 18000); appendLog("❄️ Cold bites without torch - Frostbitten! Seek warmth or Healer."); }
+    if (Math.random() < 0.25) { addEffect("fear", 15000); appendLog("😱 Darkness whispers - Fear! Healer or torchlight cures."); }
+    if (Math.random() < 0.15) { addEffect("dazed", 12000); appendLog("💫 You stumble in dark - Dazed!"); }
+  } else if (situation === "marsh_forage_fail") {
+    if (roll < 0.40) { addEffect("entangled", 15000); appendLog("🌿 Marsh vines entangle - Entangled! -10% cunning. Use torch or Healer."); }
+    if (Math.random() < 0.20) { addEffect("frostbitten", 12000); }
+  } else if (situation === "wilds_explore") {
+    if (roll < 0.30) { addEffect("entangled", 12000); appendLog("🌲 Wilds roots grab - Entangled!"); }
+    if (Math.random() < 0.20) { addEffect("fear", 12000); appendLog("😱 Wilds howl - Fear!"); }
+    if (Math.random() < 0.15) { addEffect("frostbitten", 10000); }
+  } else if (situation === "vault_explore") {
+    if (roll < 0.30) { addEffect("scorched", 15000); appendLog("🔥 Vault heat scalds - Scorched! -7% resilience. Waterskin or Healer cures."); }
+    if (Math.random() < 0.20) { addEffect("drained", 15000); appendLog("💧 Vault drains your mana - Drained! Waterskin or rest cures."); }
+    if (Math.random() < 0.20) { addEffect("fear", 12000); }
+  } else if (situation === "heavy_damage") {
+    if (roll < 0.35) { addEffect("brittle", 18000); appendLog("💔 Heavy blow - Brittle! Armor weakened, +damage taken. Ironbark or Healer cures."); }
+    if (Math.random() < 0.25) { addEffect("dazed", 12000); }
+    if (Math.random() < 0.20) { addEffect("weak", 15000); }
+  } else if (situation === "titanblood_end") {
+    if (roll < 0.60) { addEffect("weak", 20000); appendLog("💪 Titanblood crashes - Weak! -12% strength. Ration or Healer cures."); }
+  } else if (situation === "sunfire_overuse") {
+    if (roll < 0.40) { addEffect("scorched", 15000); appendLog("☀️ Sunfire burns too hot - Scorched!"); }
+  } else if (situation === "low_mana") {
+    if (roll < 0.40) { addEffect("drained", 15000); appendLog("🌀 Mana exhausted - Drained! -12% arcana. Waterskin or rest."); }
+  } else if (situation === "bleeding_long") {
+    if (roll < 0.40) { addEffect("weak", 15000); appendLog("🩸 Long bleeding weakens you - Weak!"); }
+  } else if (situation === "cursed_long") {
+    if (roll < 0.30) { addEffect("fear", 12000); appendLog("👁️ Curse brings fear..."); }
+    if (Math.random() < 0.20) { addEffect("drained", 12000); }
+  } else if (situation === "failed_cunning") {
+    if (roll < 0.30) { addEffect("dazed", 12000); appendLog("💫 Failed cunning check - Dazed!"); }
+  } else if (situation === "failed_strength") {
+    if (roll < 0.25) { addEffect("weak", 12000); }
+    if (Math.random() < 0.20) { addEffect("brittle", 12000); }
+  }
+}
+
+
 function roamActV2(s, kind) {
   if (!s) return;
   normalizeState(s);
@@ -456,6 +501,16 @@ function roamActV2(s, kind) {
     if (area.cost.torch && (inv.torch||0) < 1) {
       appendLog('Needs torch. -20% accuracy risk.');
       if (Math.random()<0.5) { appendLog('Stumble dark HP-4'); applyDamage(4); }
+      maybeApplyDebuffFromSituation(s, "ruins_no_torch");
+      if (area.key === 'ruins' || area.key === 'vault' || area.key === 'wilds' || area.key === 'marsh') {
+        if (Math.random()<0.4) maybeApplyDebuffFromSituation(s, area.key === 'marsh' ? "marsh_forage_fail" : (area.key === 'wilds' ? "wilds_explore" : "vault_explore"));
+      }
+    } else if (area.key === 'marsh' && Math.random() < 0.25) {
+      maybeApplyDebuffFromSituation(s, "marsh_forage_fail");
+    } else if (area.key === 'wilds' && Math.random() < 0.3) {
+      maybeApplyDebuffFromSituation(s, "wilds_explore");
+    } else if (area.key === 'vault' && Math.random() < 0.25) {
+      maybeApplyDebuffFromSituation(s, "vault_explore");
     }
     v2.risk = Math.min(100, v2.risk + 10 + area.danger*4);
     if (Math.random() < 0.6) {

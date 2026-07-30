@@ -215,7 +215,7 @@ function resumeAllEffects(s) {
 }
 
 function sanitizePermanentEffects(s) {
-  const allowedPerm = ['bleeding', 'poisoned', 'cursed'];
+  const allowedPerm = ['bleeding', 'poisoned', 'cursed', 'weak', 'dazed', 'drained', 'brittle', 'frostbitten', 'scorched', 'entangled', 'fear'];
   const target = s || state;
   if (!target || !target.effects) return 0;
   let fixed = 0;
@@ -289,7 +289,8 @@ function activeEffectsForState(s) {
 let lastEffectsSig = "";
 function renderEffectsUi() {
   if (!state) {
-    document.body.classList.remove("fx-bleeding", "fx-rested", "fx-cursed", "fx-poisoned", "fx-shielded");
+    const allFxKeys = ["bleeding","poisoned","cursed","rested","shielded","aether","hasted","well_fed","hydrated","torchlight","titanblood","sunfire","voidsalt","wyrmhide","ironbark","smokeveil","shadowstep","mindglass","stormseed","weak","dazed","drained","brittle","frostbitten","scorched","entangled","fear","hit"];
+    for (const fk of allFxKeys) document.body.classList.remove("fx-" + fk);
     if (fxBadges) fxBadges.innerHTML = "";
     return;
   }
@@ -299,11 +300,11 @@ function renderEffectsUi() {
   const t = nowMs();
 
   const has = (k) => list.some((e) => e.key === k);
-  document.body.classList.toggle("fx-bleeding", has("bleeding"));
-  document.body.classList.toggle("fx-rested", has("rested"));
-  document.body.classList.toggle("fx-cursed", has("cursed"));
-  document.body.classList.toggle("fx-poisoned", has("poisoned"));
-  document.body.classList.toggle("fx-shielded", has("shielded"));
+  // All effects now have visual FX
+  const allFxKeys = ["bleeding","poisoned","cursed","rested","shielded","aether","hasted","well_fed","hydrated","torchlight","titanblood","sunfire","voidsalt","wyrmhide","ironbark","smokeveil","shadowstep","mindglass","stormseed","weak","dazed","drained","brittle","frostbitten","scorched","entangled","fear","hit"];
+  for (const fk of allFxKeys) {
+    document.body.classList.toggle("fx-" + fk, has(fk));
+  }
 
   if (fxBadges) {
     fxBadges.innerHTML = "";
@@ -361,7 +362,16 @@ function pruneExpiredEffects() {
     }
   }
   if (expired.length) {
-    for (let i = 0; i < expired.length; i++) playEffectSfx(expired[i], "expire", i * 70);
+    for (let i = 0; i < expired.length; i++) {
+      playEffectSfx(expired[i], "expire", i * 70);
+      // Situation: titanblood ending can cause weak
+      if (expired[i] === "titanblood" && typeof maybeApplyDebuffFromSituation === 'function') {
+        try { maybeApplyDebuffFromSituation(state, "titanblood_end"); } catch(e) {}
+      }
+      if (expired[i] === "sunfire" && typeof maybeApplyDebuffFromSituation === 'function') {
+        try { if (Math.random() < 0.3) maybeApplyDebuffFromSituation(state, "sunfire_overuse"); } catch(e) {}
+      }
+    }
   }
   if (changed) {
     renderEffectsUi();
@@ -389,6 +399,9 @@ function tickEffects() {
       playEffectSfx("bleeding", "tick");
       appendLog(`🩸 Bleeding hurts you (-${dealt} HP) - use Bandage or Healer to cure.`);
       renderStats(); renderLog(); autoSave();
+      if (typeof maybeApplyDebuffFromSituation === 'function' && Math.random() < 0.25) {
+        try { maybeApplyDebuffFromSituation(state, "bleeding_long"); } catch(e) {}
+      }
     }
   }
 
@@ -565,8 +578,94 @@ function tickEffects() {
     if (typeof hasted.nextTickAt !== "number") hasted.nextTickAt = t + 9000;
     if (t >= hasted.nextTickAt) {
       hasted.nextTickAt += 9000;
-      // small stamina message
       if (Math.random() < 0.3) appendLog(`⚡ Hasted - you move quick (+12% cunning, +20% escape).`);
+    }
+  }
+
+  // New debuffs ticks - each has situation and cure
+  const weak = state.effects.weak;
+  if (weak && (typeof weak.expiresAt === "number" && weak.expiresAt > t || weak.permanent)) {
+    if (typeof weak.nextTickAt !== "number") weak.nextTickAt = t + 15000;
+    if (t >= weak.nextTickAt) {
+      weak.nextTickAt += 15000;
+      if (!weak.permanent) appendLog(`💪 Weak lingers (-12% strength) - Ration, Healer, or rest cures.`);
+    }
+  }
+
+  const dazed = state.effects.dazed;
+  if (dazed && (typeof dazed.expiresAt === "number" && dazed.expiresAt > t || dazed.permanent)) {
+    if (typeof dazed.nextTickAt !== "number") dazed.nextTickAt = t + 12000;
+    if (t >= dazed.nextTickAt) {
+      dazed.nextTickAt += 12000;
+      if (!dazed.permanent) appendLog(`💫 Dazed - vision blurs (-12% cunning) - Mindglass or Healer cures.`);
+    }
+  }
+
+  const drained = state.effects.drained;
+  if (drained && (typeof drained.expiresAt === "number" && drained.expiresAt > t || drained.permanent)) {
+    if (typeof drained.nextTickAt !== "number") drained.nextTickAt = t + 8000;
+    if (t >= drained.nextTickAt) {
+      drained.nextTickAt += 8000;
+      const drain = Math.min(2, state.mana || 0);
+      if (drain > 0) {
+        state.mana = Math.max(0, (state.mana||0)-drain);
+        appendLog(`🌀 Drained saps mana (-${drain}) - Waterskin, rest, or Healer cures.`);
+        renderStats(); renderLog(); autoSave();
+      }
+    }
+  }
+
+  const brittle = state.effects.brittle;
+  if (brittle && (typeof brittle.expiresAt === "number" && brittle.expiresAt > t || brittle.permanent)) {
+    if (typeof brittle.nextTickAt !== "number") brittle.nextTickAt = t + 14000;
+    if (t >= brittle.nextTickAt) {
+      brittle.nextTickAt += 14000;
+      if (!brittle.permanent) appendLog(`💔 Brittle - armor cracked (-10% resilience) - Ironbark, Wyrmhide, or Healer cures.`);
+    }
+  }
+
+  const frost = state.effects.frostbitten;
+  if (frost && (typeof frost.expiresAt === "number" && frost.expiresAt > t || frost.permanent)) {
+    if (typeof frost.nextTickAt !== "number") frost.nextTickAt = t + 7000;
+    if (t >= frost.nextTickAt) {
+      frost.nextTickAt += 7000;
+      const dealt = applyDamage(1, { fromEffect: true }) || 0;
+      appendLog(`❄️ Frostbitten chills (-${dealt} HP) - Torchlight, warm fire, or Healer cures.`);
+      renderStats(); renderLog(); autoSave();
+    }
+  }
+
+  const scorch = state.effects.scorched;
+  if (scorch && (typeof scorch.expiresAt === "number" && scorch.expiresAt > t || scorch.permanent)) {
+    if (typeof scorch.nextTickAt !== "number") scorch.nextTickAt = t + 6000;
+    if (t >= scorch.nextTickAt) {
+      scorch.nextTickAt += 6000;
+      const dealt = applyDamage(1, { fromEffect: true }) || 0;
+      appendLog(`🔥 Scorched burns (-${dealt} HP) - Waterskin, Aether, or Healer cures.`);
+      renderStats(); renderLog(); autoSave();
+    }
+  }
+
+  const ent = state.effects.entangled;
+  if (ent && (typeof ent.expiresAt === "number" && ent.expiresAt > t || ent.permanent)) {
+    if (typeof ent.nextTickAt !== "number") ent.nextTickAt = t + 13000;
+    if (t >= ent.nextTickAt) {
+      ent.nextTickAt += 13000;
+      if (!ent.permanent) appendLog(`🌿 Entangled - roots hold (-10% cunning) - Torch, Hasted, or Healer cures.`);
+    }
+  }
+
+  const fear = state.effects.fear;
+  if (fear && (typeof fear.expiresAt === "number" && fear.expiresAt > t || fear.permanent)) {
+    if (typeof fear.nextTickAt !== "number") fear.nextTickAt = t + 10000;
+    if (t >= fear.nextTickAt) {
+      fear.nextTickAt += 10000;
+      if (Math.random() < 0.4 && (state.mana||0) > 0) {
+        const drain = Math.min(1, state.mana);
+        state.mana = Math.max(0, (state.mana||0)-drain);
+        appendLog(`😱 Fear gnaws (-${drain} mana) - Torchlight, Rested, or Healer cures.`);
+        renderStats(); renderLog(); autoSave();
+      }
     }
   }
 }

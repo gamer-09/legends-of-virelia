@@ -1736,13 +1736,29 @@ function effectBonusForStat(s, statKey) {
   if (k === "strength" && hasEffectOnState(s, "stormseed")) bonus += 0.08;
   if (k === "arcana" && hasEffectOnState(s, "aether")) bonus += 0.04;
 
-  // Debuffs reduce stats
+  // Debuffs reduce stats - each debuff now does something meaningful
   if (k === "strength" && hasEffectOnState(s, "bleeding")) bonus -= 0.05;
   if (k === "resilience" && hasEffectOnState(s, "poisoned")) bonus -= 0.06;
   if (k === "arcana" && hasEffectOnState(s, "cursed")) bonus -= 0.10;
   if (k === "cunning" && hasEffectOnState(s, "cursed")) bonus -= 0.05;
 
-  return clamp(bonus, -0.15, 0.22);
+  // New debuffs with situations
+  if (k === "strength" && hasEffectOnState(s, "weak")) bonus -= 0.12; // weak: overexertion, titanblood crash, bleeding long
+  if (k === "cunning" && hasEffectOnState(s, "dazed")) bonus -= 0.12; // dazed: failed cunning check, heavy hit, mindglass overdose
+  if (k === "arcana" && hasEffectOnState(s, "drained")) bonus -= 0.12; // drained: low mana, sunfire/aether expiry, cursed
+  if (k === "resilience" && hasEffectOnState(s, "brittle")) bonus -= 0.10; // brittle: shield breaks, heavy damage >30% HP
+  if (k === "cunning" && hasEffectOnState(s, "brittle")) bonus -= 0.04;
+  if (k === "strength" && hasEffectOnState(s, "frostbitten")) bonus -= 0.06; // frostbitten: wilds/marsh/ruins without torch/warm
+  if (k === "cunning" && hasEffectOnState(s, "frostbitten")) bonus -= 0.06;
+  if (k === "resilience" && hasEffectOnState(s, "scorched")) bonus -= 0.07; // scorched: vault fire, sunfire overuse, fire trap
+  if (k === "strength" && hasEffectOnState(s, "scorched")) bonus -= 0.05;
+  if (k === "cunning" && hasEffectOnState(s, "entangled")) bonus -= 0.10; // entangled: marsh foraging fail, wilds
+  if (k === "strength" && hasEffectOnState(s, "entangled")) bonus -= 0.06;
+  if (k === "cunning" && hasEffectOnState(s, "fear")) bonus -= 0.08; // fear: hollow child, ruins/vault fail, omen
+  if (k === "resilience" && hasEffectOnState(s, "fear")) bonus -= 0.06;
+  if (k === "arcana" && hasEffectOnState(s, "fear")) bonus -= 0.06;
+
+  return clamp(bonus, -0.35, 0.25);
 }
 
 function useItem(itemKey, ev, targetId) {
@@ -2122,13 +2138,28 @@ function useItem(itemKey, ev, targetId) {
     const heal = Math.max(2, Math.floor(4 + res * 0.4));
     state.hp = Math.min(playerMaxHp(), (state.hp || 0) + heal);
     addEffect("well_fed", 10000);
-    logLine(`🍞 You eat rations (+${heal} HP).`);
+    // Ration cures weak - situation: weak from overexertion/bleeding long
+    if (hasEffectOnState(state, "weak")) { clearEffect("weak"); if (state.effects) delete state.effects["weak"]; logLine(`🍞 Rations cure Weak! (+${heal} HP) + Well Fed.`); }
+    else logLine(`🍞 You eat rations (+${heal} HP) + Well Fed.`);
   } else if (k === "waterskin") {
     addEffect("hydrated", 12000);
-    logLine("💧 You drink from the waterskin.");
+    // Waterskin cures drained and scorched - situation: drained from low mana, scorched from vault heat
+    let cured = [];
+    if (hasEffectOnState(state, "drained")) { clearEffect("drained"); if (state.effects) delete state.effects["drained"]; cured.push("drained"); }
+    if (hasEffectOnState(state, "scorched") && Math.random() < 0.6) { clearEffect("scorched"); if (state.effects) delete state.effects["scorched"]; cured.push("scorched"); }
+    if (cured.length) logLine(`💧 Waterskin cures ${cured.join(", ")} + Hydrated.`);
+    else logLine("💧 You drink from the waterskin + Hydrated.");
   } else if (k === "torch") {
     addEffect("torchlight", 12000);
-    logLine("🔥 You light a torch. The shadows pull back.");
+    // Torch cures frostbitten, fear, entangled, dazed - situation: ruins_no_torch, marsh, wilds
+    let cured = [];
+    if (hasEffectOnState(state, "frostbitten")) { clearEffect("frostbitten"); if (state.effects) delete state.effects["frostbitten"]; cured.push("frostbitten"); }
+    if (hasEffectOnState(state, "fear") && Math.random() < 0.7) { clearEffect("fear"); if (state.effects) delete state.effects["fear"]; cured.push("fear"); }
+    if (hasEffectOnState(state, "entangled") && Math.random() < 0.6) { clearEffect("entangled"); if (state.effects) delete state.effects["entangled"]; cured.push("entangled"); }
+    if (hasEffectOnState(state, "dazed") && Math.random() < 0.5) { clearEffect("dazed"); if (state.effects) delete state.effects["dazed"]; cured.push("dazed"); }
+    if (cured.length) logLine(`🔥 Torch light cures ${cured.join(", ")} + Torchlight! Shadows pull back.`);
+    else logLine("🔥 You light a torch. The shadows pull back + Torchlight.");
+
   } else if (k === "smoke_bomb") {
     if (inCombat) {
       const list = aliveEnemies(combatEv);

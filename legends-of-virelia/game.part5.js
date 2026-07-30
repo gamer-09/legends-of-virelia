@@ -1236,25 +1236,46 @@ const STORY = {
         },
       });
       out.push({
-        label: "Cleanse All (25g) - removes ALL negative effects",
+        label: "Cleanse All (25g) - removes ALL negative/debuffs",
         next: "healer",
         disabled: !met || (!isAdminProfile(s.profile) && (s.gold || 0) < 25),
         effect: () => {
           if (!spendGold(25)) return;
-          const toClear = ["bleeding","poisoned","cursed"];
+          const toClear = ["bleeding","poisoned","cursed","weak","dazed","drained","brittle","frostbitten","scorched","entangled","fear"];
           let cleared = [];
           for (const k of toClear) {
             if (hasEffectOnState(s, k) || (s.effects && s.effects[k])) { cleared.push(k); clearEffect(k); if (s.effects && s.effects[k]) delete s.effects[k]; }
           }
-          // Clear any debuff that is negative
+          // Clear any debuff that is negative including permanent
           if (s.effects) {
             for (const k of Object.keys(s.effects)) {
-              if (["bleeding","poisoned","cursed"].includes(k)) delete s.effects[k];
+              if (toClear.includes(k) || s.effects[k]?.permanent) {
+                if (["bleeding","poisoned","cursed","weak","dazed","drained","brittle","frostbitten","scorched","entangled","fear"].includes(k) || s.effects[k]?.permanent) {
+                  delete s.effects[k];
+                  if (!cleared.includes(k)) cleared.push(k);
+                }
+              }
             }
           }
           addEffect("rested", 12000);
           addEffect("aether", 8000);
           appendLog(cleared.length ? `The healer uses rare herbs. Cleansed: ${cleared.join(", ")} + Rested + Aether.` : "The healer cleanses you - Rested + Aether.");
+        },
+      });
+      out.push({
+        label: "Warmth & Courage (18g) - cures frostbitten/fear/entangled",
+        next: "healer",
+        disabled: !met || (!isAdminProfile(s.profile) && (s.gold || 0) < 18),
+        effect: () => {
+          if (!spendGold(18)) return;
+          const toClear = ["frostbitten","fear","entangled","dazed"];
+          let cleared = [];
+          for (const k of toClear) {
+            if (hasEffectOnState(s,k) || (s.effects && s.effects[k])) { clearEffect(k); if (s.effects) delete s.effects[k]; cleared.push(k); }
+          }
+          addEffect("torchlight", 10000);
+          addEffect("rested", 6000);
+          appendLog(cleared.length ? `Healer wraps you in warm blankets and chants. Cured: ${cleared.join(", ")} + Torchlight.` : "Healer grants Torchlight and warmth.");
         },
       });
       out.push({

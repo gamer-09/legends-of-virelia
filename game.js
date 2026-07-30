@@ -1736,13 +1736,29 @@ function effectBonusForStat(s, statKey) {
   if (k === "strength" && hasEffectOnState(s, "stormseed")) bonus += 0.08;
   if (k === "arcana" && hasEffectOnState(s, "aether")) bonus += 0.04;
 
-  // Debuffs reduce stats
+  // Debuffs reduce stats - each debuff now does something meaningful
   if (k === "strength" && hasEffectOnState(s, "bleeding")) bonus -= 0.05;
   if (k === "resilience" && hasEffectOnState(s, "poisoned")) bonus -= 0.06;
   if (k === "arcana" && hasEffectOnState(s, "cursed")) bonus -= 0.10;
   if (k === "cunning" && hasEffectOnState(s, "cursed")) bonus -= 0.05;
 
-  return clamp(bonus, -0.15, 0.22);
+  // New debuffs with situations
+  if (k === "strength" && hasEffectOnState(s, "weak")) bonus -= 0.12; // weak: overexertion, titanblood crash, bleeding long
+  if (k === "cunning" && hasEffectOnState(s, "dazed")) bonus -= 0.12; // dazed: failed cunning check, heavy hit, mindglass overdose
+  if (k === "arcana" && hasEffectOnState(s, "drained")) bonus -= 0.12; // drained: low mana, sunfire/aether expiry, cursed
+  if (k === "resilience" && hasEffectOnState(s, "brittle")) bonus -= 0.10; // brittle: shield breaks, heavy damage >30% HP
+  if (k === "cunning" && hasEffectOnState(s, "brittle")) bonus -= 0.04;
+  if (k === "strength" && hasEffectOnState(s, "frostbitten")) bonus -= 0.06; // frostbitten: wilds/marsh/ruins without torch/warm
+  if (k === "cunning" && hasEffectOnState(s, "frostbitten")) bonus -= 0.06;
+  if (k === "resilience" && hasEffectOnState(s, "scorched")) bonus -= 0.07; // scorched: vault fire, sunfire overuse, fire trap
+  if (k === "strength" && hasEffectOnState(s, "scorched")) bonus -= 0.05;
+  if (k === "cunning" && hasEffectOnState(s, "entangled")) bonus -= 0.10; // entangled: marsh foraging fail, wilds
+  if (k === "strength" && hasEffectOnState(s, "entangled")) bonus -= 0.06;
+  if (k === "cunning" && hasEffectOnState(s, "fear")) bonus -= 0.08; // fear: hollow child, ruins/vault fail, omen
+  if (k === "resilience" && hasEffectOnState(s, "fear")) bonus -= 0.06;
+  if (k === "arcana" && hasEffectOnState(s, "fear")) bonus -= 0.06;
+
+  return clamp(bonus, -0.35, 0.25);
 }
 
 function useItem(itemKey, ev, targetId) {
@@ -2122,13 +2138,28 @@ function useItem(itemKey, ev, targetId) {
     const heal = Math.max(2, Math.floor(4 + res * 0.4));
     state.hp = Math.min(playerMaxHp(), (state.hp || 0) + heal);
     addEffect("well_fed", 10000);
-    logLine(`🍞 You eat rations (+${heal} HP).`);
+    // Ration cures weak - situation: weak from overexertion/bleeding long
+    if (hasEffectOnState(state, "weak")) { clearEffect("weak"); if (state.effects) delete state.effects["weak"]; logLine(`🍞 Rations cure Weak! (+${heal} HP) + Well Fed.`); }
+    else logLine(`🍞 You eat rations (+${heal} HP) + Well Fed.`);
   } else if (k === "waterskin") {
     addEffect("hydrated", 12000);
-    logLine("💧 You drink from the waterskin.");
+    // Waterskin cures drained and scorched - situation: drained from low mana, scorched from vault heat
+    let cured = [];
+    if (hasEffectOnState(state, "drained")) { clearEffect("drained"); if (state.effects) delete state.effects["drained"]; cured.push("drained"); }
+    if (hasEffectOnState(state, "scorched") && Math.random() < 0.6) { clearEffect("scorched"); if (state.effects) delete state.effects["scorched"]; cured.push("scorched"); }
+    if (cured.length) logLine(`💧 Waterskin cures ${cured.join(", ")} + Hydrated.`);
+    else logLine("💧 You drink from the waterskin + Hydrated.");
   } else if (k === "torch") {
     addEffect("torchlight", 12000);
-    logLine("🔥 You light a torch. The shadows pull back.");
+    // Torch cures frostbitten, fear, entangled, dazed - situation: ruins_no_torch, marsh, wilds
+    let cured = [];
+    if (hasEffectOnState(state, "frostbitten")) { clearEffect("frostbitten"); if (state.effects) delete state.effects["frostbitten"]; cured.push("frostbitten"); }
+    if (hasEffectOnState(state, "fear") && Math.random() < 0.7) { clearEffect("fear"); if (state.effects) delete state.effects["fear"]; cured.push("fear"); }
+    if (hasEffectOnState(state, "entangled") && Math.random() < 0.6) { clearEffect("entangled"); if (state.effects) delete state.effects["entangled"]; cured.push("entangled"); }
+    if (hasEffectOnState(state, "dazed") && Math.random() < 0.5) { clearEffect("dazed"); if (state.effects) delete state.effects["dazed"]; cured.push("dazed"); }
+    if (cured.length) logLine(`🔥 Torch light cures ${cured.join(", ")} + Torchlight! Shadows pull back.`);
+    else logLine("🔥 You light a torch. The shadows pull back + Torchlight.");
+
   } else if (k === "smoke_bomb") {
     if (inCombat) {
       const list = aliveEnemies(combatEv);
@@ -4528,8 +4559,33 @@ function renderAdminTools() {
   }
 
   const effectKeys = [
-    "bleeding","poisoned","cursed","rested","shielded","aether","hasted","well_fed","hydrated","torchlight",
-    "titanblood","sunfire","voidsalt","wyrmhide","ironbark","smokeveil","shadowstep","mindglass","stormseed"
+    "bleeding",
+    "poisoned",
+    "cursed",
+    "rested",
+    "shielded",
+    "aether",
+    "hasted",
+    "well_fed",
+    "hydrated",
+    "torchlight",
+    "titanblood",
+    "sunfire",
+    "voidsalt",
+    "wyrmhide",
+    "ironbark",
+    "smokeveil",
+    "shadowstep",
+    "mindglass",
+    "stormseed",
+    "weak",
+    "dazed",
+    "drained",
+    "brittle",
+    "frostbitten",
+    "scorched",
+    "entangled",
+    "fear"
   ];
   const uniqueEffectKeys = [...new Set(effectKeys)].sort();
   const effectSel = document.createElement("select");
@@ -4565,7 +4621,7 @@ function renderAdminTools() {
   effectPermLabel.appendChild(effectPermCheck);
   effectPermLabel.appendChild(effectPermText);
 
-  const allowedPermanentEffects = ['bleeding', 'poisoned', 'cursed'];
+  const allowedPermanentEffects = ['bleeding', 'poisoned', 'cursed', 'weak', 'dazed', 'drained', 'brittle', 'frostbitten', 'scorched', 'entangled', 'fear'];
   function updatePermanentCheckboxState() {
     const selEff = String(effectSel.value || "").trim().toLowerCase();
     const canBePerm = allowedPermanentEffects.includes(selEff);
@@ -4642,7 +4698,7 @@ function renderAdminTools() {
     const targetProfile = String(profileSel.value || "").trim();
     const effKey = String(effectSel.value || "").trim();
     const isPerm = effectPermCheck.checked;
-    const allowedPerm = ['bleeding', 'poisoned', 'cursed'];
+    const allowedPerm = ['bleeding', 'poisoned', 'cursed', 'weak', 'dazed', 'drained', 'brittle', 'frostbitten', 'scorched', 'entangled', 'fear'];
     if (isPerm && !allowedPerm.includes(effKey.toLowerCase())) {
       setHomeMsg(`Exploit blocked: ${effKey} cannot be made permanent. Only bleeding, poisoned, cursed can be permanent.`);
       return;
@@ -4696,7 +4752,7 @@ function renderAdminTools() {
   btnApplyAll.addEventListener("click", () => {
     const effKey = String(effectSel.value || "").trim();
     const isPermAll = effectPermCheck.checked;
-    const allowedPerm = ['bleeding', 'poisoned', 'cursed'];
+    const allowedPerm = ['bleeding', 'poisoned', 'cursed', 'weak', 'dazed', 'drained', 'brittle', 'frostbitten', 'scorched', 'entangled', 'fear'];
     if (isPermAll && !allowedPerm.includes(effKey.toLowerCase())) {
       setHomeMsg(`Exploit blocked: ${effKey} cannot be made permanent for all. Only bleeding, poisoned, cursed allowed.`);
       return;
@@ -4704,7 +4760,6 @@ function renderAdminTools() {
     const durSec = parseFloat(effectDurInput.value || "15");
     const durMs = Math.max(1000, Math.floor((isFinite(durSec) ? durSec : 15) * 1000));
     const allProfiles = (typeof listSaveProfiles === 'function') ? listSaveProfiles() : [];
-    const isPermAll = effectPermCheck.checked;
     for (const prof of allProfiles) {
       if (prof === ADMIN_PROFILE) continue;
       stageEffectChange(prof, (staged) => {
@@ -5194,8 +5249,23 @@ function applyDamage(dmg, opts) {
   if (fx) playHitFx();
   state.hp -= amount;
 
-  if (!o.fromEffect && amount >= 8 && Math.random() < 0.35) {
-    addEffect("bleeding", 15000);
+  if (!o.fromEffect) {
+    if (amount >= 8 && Math.random() < 0.35) {
+      addEffect("bleeding", 15000);
+    }
+    // Heavy damage situations trigger new debuffs
+    const maxHp = playerMaxHp();
+    if (amount >= maxHp * 0.30) {
+      if (Math.random() < 0.45) { addEffect("brittle", 18000); appendLog("💔 Heavy blow - Brittle! Armor cracked."); }
+      if (Math.random() < 0.35) { addEffect("weak", 15000); }
+      if (Math.random() < 0.25) { addEffect("dazed", 12000); }
+    } else if (amount >= maxHp * 0.18) {
+      if (Math.random() < 0.25) { addEffect("dazed", 10000); }
+    }
+    if (amount >= 12 && Math.random() < 0.15) {
+      // Chance for fear on big hit
+      addEffect("fear", 12000);
+    }
   }
   if (state.hp <= 0) {
     state.hp = 0;
@@ -7479,7 +7549,7 @@ function resumeAllEffects(s) {
 }
 
 function sanitizePermanentEffects(s) {
-  const allowedPerm = ['bleeding', 'poisoned', 'cursed'];
+  const allowedPerm = ['bleeding', 'poisoned', 'cursed', 'weak', 'dazed', 'drained', 'brittle', 'frostbitten', 'scorched', 'entangled', 'fear'];
   const target = s || state;
   if (!target || !target.effects) return 0;
   let fixed = 0;
@@ -7553,7 +7623,8 @@ function activeEffectsForState(s) {
 let lastEffectsSig = "";
 function renderEffectsUi() {
   if (!state) {
-    document.body.classList.remove("fx-bleeding", "fx-rested", "fx-cursed", "fx-poisoned", "fx-shielded");
+    const allFxKeys = ["bleeding","poisoned","cursed","rested","shielded","aether","hasted","well_fed","hydrated","torchlight","titanblood","sunfire","voidsalt","wyrmhide","ironbark","smokeveil","shadowstep","mindglass","stormseed","weak","dazed","drained","brittle","frostbitten","scorched","entangled","fear","hit"];
+    for (const fk of allFxKeys) document.body.classList.remove("fx-" + fk);
     if (fxBadges) fxBadges.innerHTML = "";
     return;
   }
@@ -7563,11 +7634,11 @@ function renderEffectsUi() {
   const t = nowMs();
 
   const has = (k) => list.some((e) => e.key === k);
-  document.body.classList.toggle("fx-bleeding", has("bleeding"));
-  document.body.classList.toggle("fx-rested", has("rested"));
-  document.body.classList.toggle("fx-cursed", has("cursed"));
-  document.body.classList.toggle("fx-poisoned", has("poisoned"));
-  document.body.classList.toggle("fx-shielded", has("shielded"));
+  // All effects now have visual FX
+  const allFxKeys = ["bleeding","poisoned","cursed","rested","shielded","aether","hasted","well_fed","hydrated","torchlight","titanblood","sunfire","voidsalt","wyrmhide","ironbark","smokeveil","shadowstep","mindglass","stormseed","weak","dazed","drained","brittle","frostbitten","scorched","entangled","fear","hit"];
+  for (const fk of allFxKeys) {
+    document.body.classList.toggle("fx-" + fk, has(fk));
+  }
 
   if (fxBadges) {
     fxBadges.innerHTML = "";
@@ -7625,7 +7696,16 @@ function pruneExpiredEffects() {
     }
   }
   if (expired.length) {
-    for (let i = 0; i < expired.length; i++) playEffectSfx(expired[i], "expire", i * 70);
+    for (let i = 0; i < expired.length; i++) {
+      playEffectSfx(expired[i], "expire", i * 70);
+      // Situation: titanblood ending can cause weak
+      if (expired[i] === "titanblood" && typeof maybeApplyDebuffFromSituation === 'function') {
+        try { maybeApplyDebuffFromSituation(state, "titanblood_end"); } catch(e) {}
+      }
+      if (expired[i] === "sunfire" && typeof maybeApplyDebuffFromSituation === 'function') {
+        try { if (Math.random() < 0.3) maybeApplyDebuffFromSituation(state, "sunfire_overuse"); } catch(e) {}
+      }
+    }
   }
   if (changed) {
     renderEffectsUi();
@@ -7653,6 +7733,9 @@ function tickEffects() {
       playEffectSfx("bleeding", "tick");
       appendLog(`🩸 Bleeding hurts you (-${dealt} HP) - use Bandage or Healer to cure.`);
       renderStats(); renderLog(); autoSave();
+      if (typeof maybeApplyDebuffFromSituation === 'function' && Math.random() < 0.25) {
+        try { maybeApplyDebuffFromSituation(state, "bleeding_long"); } catch(e) {}
+      }
     }
   }
 
@@ -7829,8 +7912,94 @@ function tickEffects() {
     if (typeof hasted.nextTickAt !== "number") hasted.nextTickAt = t + 9000;
     if (t >= hasted.nextTickAt) {
       hasted.nextTickAt += 9000;
-      // small stamina message
       if (Math.random() < 0.3) appendLog(`⚡ Hasted - you move quick (+12% cunning, +20% escape).`);
+    }
+  }
+
+  // New debuffs ticks - each has situation and cure
+  const weak = state.effects.weak;
+  if (weak && (typeof weak.expiresAt === "number" && weak.expiresAt > t || weak.permanent)) {
+    if (typeof weak.nextTickAt !== "number") weak.nextTickAt = t + 15000;
+    if (t >= weak.nextTickAt) {
+      weak.nextTickAt += 15000;
+      if (!weak.permanent) appendLog(`💪 Weak lingers (-12% strength) - Ration, Healer, or rest cures.`);
+    }
+  }
+
+  const dazed = state.effects.dazed;
+  if (dazed && (typeof dazed.expiresAt === "number" && dazed.expiresAt > t || dazed.permanent)) {
+    if (typeof dazed.nextTickAt !== "number") dazed.nextTickAt = t + 12000;
+    if (t >= dazed.nextTickAt) {
+      dazed.nextTickAt += 12000;
+      if (!dazed.permanent) appendLog(`💫 Dazed - vision blurs (-12% cunning) - Mindglass or Healer cures.`);
+    }
+  }
+
+  const drained = state.effects.drained;
+  if (drained && (typeof drained.expiresAt === "number" && drained.expiresAt > t || drained.permanent)) {
+    if (typeof drained.nextTickAt !== "number") drained.nextTickAt = t + 8000;
+    if (t >= drained.nextTickAt) {
+      drained.nextTickAt += 8000;
+      const drain = Math.min(2, state.mana || 0);
+      if (drain > 0) {
+        state.mana = Math.max(0, (state.mana||0)-drain);
+        appendLog(`🌀 Drained saps mana (-${drain}) - Waterskin, rest, or Healer cures.`);
+        renderStats(); renderLog(); autoSave();
+      }
+    }
+  }
+
+  const brittle = state.effects.brittle;
+  if (brittle && (typeof brittle.expiresAt === "number" && brittle.expiresAt > t || brittle.permanent)) {
+    if (typeof brittle.nextTickAt !== "number") brittle.nextTickAt = t + 14000;
+    if (t >= brittle.nextTickAt) {
+      brittle.nextTickAt += 14000;
+      if (!brittle.permanent) appendLog(`💔 Brittle - armor cracked (-10% resilience) - Ironbark, Wyrmhide, or Healer cures.`);
+    }
+  }
+
+  const frost = state.effects.frostbitten;
+  if (frost && (typeof frost.expiresAt === "number" && frost.expiresAt > t || frost.permanent)) {
+    if (typeof frost.nextTickAt !== "number") frost.nextTickAt = t + 7000;
+    if (t >= frost.nextTickAt) {
+      frost.nextTickAt += 7000;
+      const dealt = applyDamage(1, { fromEffect: true }) || 0;
+      appendLog(`❄️ Frostbitten chills (-${dealt} HP) - Torchlight, warm fire, or Healer cures.`);
+      renderStats(); renderLog(); autoSave();
+    }
+  }
+
+  const scorch = state.effects.scorched;
+  if (scorch && (typeof scorch.expiresAt === "number" && scorch.expiresAt > t || scorch.permanent)) {
+    if (typeof scorch.nextTickAt !== "number") scorch.nextTickAt = t + 6000;
+    if (t >= scorch.nextTickAt) {
+      scorch.nextTickAt += 6000;
+      const dealt = applyDamage(1, { fromEffect: true }) || 0;
+      appendLog(`🔥 Scorched burns (-${dealt} HP) - Waterskin, Aether, or Healer cures.`);
+      renderStats(); renderLog(); autoSave();
+    }
+  }
+
+  const ent = state.effects.entangled;
+  if (ent && (typeof ent.expiresAt === "number" && ent.expiresAt > t || ent.permanent)) {
+    if (typeof ent.nextTickAt !== "number") ent.nextTickAt = t + 13000;
+    if (t >= ent.nextTickAt) {
+      ent.nextTickAt += 13000;
+      if (!ent.permanent) appendLog(`🌿 Entangled - roots hold (-10% cunning) - Torch, Hasted, or Healer cures.`);
+    }
+  }
+
+  const fear = state.effects.fear;
+  if (fear && (typeof fear.expiresAt === "number" && fear.expiresAt > t || fear.permanent)) {
+    if (typeof fear.nextTickAt !== "number") fear.nextTickAt = t + 10000;
+    if (t >= fear.nextTickAt) {
+      fear.nextTickAt += 10000;
+      if (Math.random() < 0.4 && (state.mana||0) > 0) {
+        const drain = Math.min(1, state.mana);
+        state.mana = Math.max(0, (state.mana||0)-drain);
+        appendLog(`😱 Fear gnaws (-${drain} mana) - Torchlight, Rested, or Healer cures.`);
+        renderStats(); renderLog(); autoSave();
+      }
     }
   }
 }
@@ -11331,25 +11500,46 @@ const STORY = {
         },
       });
       out.push({
-        label: "Cleanse All (25g) - removes ALL negative effects",
+        label: "Cleanse All (25g) - removes ALL negative/debuffs",
         next: "healer",
         disabled: !met || (!isAdminProfile(s.profile) && (s.gold || 0) < 25),
         effect: () => {
           if (!spendGold(25)) return;
-          const toClear = ["bleeding","poisoned","cursed"];
+          const toClear = ["bleeding","poisoned","cursed","weak","dazed","drained","brittle","frostbitten","scorched","entangled","fear"];
           let cleared = [];
           for (const k of toClear) {
             if (hasEffectOnState(s, k) || (s.effects && s.effects[k])) { cleared.push(k); clearEffect(k); if (s.effects && s.effects[k]) delete s.effects[k]; }
           }
-          // Clear any debuff that is negative
+          // Clear any debuff that is negative including permanent
           if (s.effects) {
             for (const k of Object.keys(s.effects)) {
-              if (["bleeding","poisoned","cursed"].includes(k)) delete s.effects[k];
+              if (toClear.includes(k) || s.effects[k]?.permanent) {
+                if (["bleeding","poisoned","cursed","weak","dazed","drained","brittle","frostbitten","scorched","entangled","fear"].includes(k) || s.effects[k]?.permanent) {
+                  delete s.effects[k];
+                  if (!cleared.includes(k)) cleared.push(k);
+                }
+              }
             }
           }
           addEffect("rested", 12000);
           addEffect("aether", 8000);
           appendLog(cleared.length ? `The healer uses rare herbs. Cleansed: ${cleared.join(", ")} + Rested + Aether.` : "The healer cleanses you - Rested + Aether.");
+        },
+      });
+      out.push({
+        label: "Warmth & Courage (18g) - cures frostbitten/fear/entangled",
+        next: "healer",
+        disabled: !met || (!isAdminProfile(s.profile) && (s.gold || 0) < 18),
+        effect: () => {
+          if (!spendGold(18)) return;
+          const toClear = ["frostbitten","fear","entangled","dazed"];
+          let cleared = [];
+          for (const k of toClear) {
+            if (hasEffectOnState(s,k) || (s.effects && s.effects[k])) { clearEffect(k); if (s.effects) delete s.effects[k]; cleared.push(k); }
+          }
+          addEffect("torchlight", 10000);
+          addEffect("rested", 6000);
+          appendLog(cleared.length ? `Healer wraps you in warm blankets and chants. Cured: ${cleared.join(", ")} + Torchlight.` : "Healer grants Torchlight and warmth.");
         },
       });
       out.push({
@@ -13363,6 +13553,51 @@ function ensureV2Roam(s) {
   return s.roam.v2;
 }
 
+
+function maybeApplyDebuffFromSituation(s, situation) {
+  if (!s || typeof addEffect !== 'function') return;
+  if (isAdminProfile && isAdminProfile(s.profile)) return; // admin immune
+  const roll = Math.random();
+  // Each situation has chance to apply specific debuffs
+  if (situation === "ruins_no_torch") {
+    if (roll < 0.35) { addEffect("frostbitten", 18000); appendLog("❄️ Cold bites without torch - Frostbitten! Seek warmth or Healer."); }
+    if (Math.random() < 0.25) { addEffect("fear", 15000); appendLog("😱 Darkness whispers - Fear! Healer or torchlight cures."); }
+    if (Math.random() < 0.15) { addEffect("dazed", 12000); appendLog("💫 You stumble in dark - Dazed!"); }
+  } else if (situation === "marsh_forage_fail") {
+    if (roll < 0.40) { addEffect("entangled", 15000); appendLog("🌿 Marsh vines entangle - Entangled! -10% cunning. Use torch or Healer."); }
+    if (Math.random() < 0.20) { addEffect("frostbitten", 12000); }
+  } else if (situation === "wilds_explore") {
+    if (roll < 0.30) { addEffect("entangled", 12000); appendLog("🌲 Wilds roots grab - Entangled!"); }
+    if (Math.random() < 0.20) { addEffect("fear", 12000); appendLog("😱 Wilds howl - Fear!"); }
+    if (Math.random() < 0.15) { addEffect("frostbitten", 10000); }
+  } else if (situation === "vault_explore") {
+    if (roll < 0.30) { addEffect("scorched", 15000); appendLog("🔥 Vault heat scalds - Scorched! -7% resilience. Waterskin or Healer cures."); }
+    if (Math.random() < 0.20) { addEffect("drained", 15000); appendLog("💧 Vault drains your mana - Drained! Waterskin or rest cures."); }
+    if (Math.random() < 0.20) { addEffect("fear", 12000); }
+  } else if (situation === "heavy_damage") {
+    if (roll < 0.35) { addEffect("brittle", 18000); appendLog("💔 Heavy blow - Brittle! Armor weakened, +damage taken. Ironbark or Healer cures."); }
+    if (Math.random() < 0.25) { addEffect("dazed", 12000); }
+    if (Math.random() < 0.20) { addEffect("weak", 15000); }
+  } else if (situation === "titanblood_end") {
+    if (roll < 0.60) { addEffect("weak", 20000); appendLog("💪 Titanblood crashes - Weak! -12% strength. Ration or Healer cures."); }
+  } else if (situation === "sunfire_overuse") {
+    if (roll < 0.40) { addEffect("scorched", 15000); appendLog("☀️ Sunfire burns too hot - Scorched!"); }
+  } else if (situation === "low_mana") {
+    if (roll < 0.40) { addEffect("drained", 15000); appendLog("🌀 Mana exhausted - Drained! -12% arcana. Waterskin or rest."); }
+  } else if (situation === "bleeding_long") {
+    if (roll < 0.40) { addEffect("weak", 15000); appendLog("🩸 Long bleeding weakens you - Weak!"); }
+  } else if (situation === "cursed_long") {
+    if (roll < 0.30) { addEffect("fear", 12000); appendLog("👁️ Curse brings fear..."); }
+    if (Math.random() < 0.20) { addEffect("drained", 12000); }
+  } else if (situation === "failed_cunning") {
+    if (roll < 0.30) { addEffect("dazed", 12000); appendLog("💫 Failed cunning check - Dazed!"); }
+  } else if (situation === "failed_strength") {
+    if (roll < 0.25) { addEffect("weak", 12000); }
+    if (Math.random() < 0.20) { addEffect("brittle", 12000); }
+  }
+}
+
+
 function roamActV2(s, kind) {
   if (!s) return;
   normalizeState(s);
@@ -13409,6 +13644,16 @@ function roamActV2(s, kind) {
     if (area.cost.torch && (inv.torch||0) < 1) {
       appendLog('Needs torch. -20% accuracy risk.');
       if (Math.random()<0.5) { appendLog('Stumble dark HP-4'); applyDamage(4); }
+      maybeApplyDebuffFromSituation(s, "ruins_no_torch");
+      if (area.key === 'ruins' || area.key === 'vault' || area.key === 'wilds' || area.key === 'marsh') {
+        if (Math.random()<0.4) maybeApplyDebuffFromSituation(s, area.key === 'marsh' ? "marsh_forage_fail" : (area.key === 'wilds' ? "wilds_explore" : "vault_explore"));
+      }
+    } else if (area.key === 'marsh' && Math.random() < 0.25) {
+      maybeApplyDebuffFromSituation(s, "marsh_forage_fail");
+    } else if (area.key === 'wilds' && Math.random() < 0.3) {
+      maybeApplyDebuffFromSituation(s, "wilds_explore");
+    } else if (area.key === 'vault' && Math.random() < 0.25) {
+      maybeApplyDebuffFromSituation(s, "vault_explore");
     }
     v2.risk = Math.min(100, v2.risk + 10 + area.danger*4);
     if (Math.random() < 0.6) {

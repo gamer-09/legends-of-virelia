@@ -499,6 +499,85 @@ body.fx-poisoned .fxLayer.poisoned { opacity: 1; background: linear-gradient(to 
 @keyframes fxPoisoned { 0%{ transform: translateY(-2px); opacity: 0.6;} 50%{ transform: translateY(1px); opacity: 1;} 100%{ transform: translateY(-2px); opacity: 0.6;} }
 body.fx-shielded .fxLayer.shielded { opacity: 1; background: radial-gradient(ellipse at center, rgba(60,140,255,0.14), rgba(60,140,255,0) 72%); border: 2px solid rgba(80,160,255,0.7); box-shadow: inset 0 0 30px rgba(80,160,255,0.25), 0 0 15px rgba(80,160,255,0.25); animation: fxShield 2.2s ease-in-out infinite; }
 @keyframes fxShield { 0%,100%{ opacity: 0.55;} 50%{ opacity: 1;} }
+
+
+body.fx-hit .fxLayer.hit { opacity: 1; background: rgba(255,0,30,0.25); animation: fxHitFlash 0.45s steps(3) 1; border: 2px solid rgba(255,0,30,0.8); box-shadow: inset 0 0 100px rgba(255,0,0,0.4); }
+
+/* Existing buffs with visuals */
+body.fx-aether .fxLayer.aether { opacity: 1; background: radial-gradient(ellipse at center, rgba(120,220,255,0.18), rgba(120,220,255,0) 70%); border: 1px solid rgba(120,220,255,0.5); animation: fxAether 2.4s ease-in-out infinite; }
+@keyframes fxAether { 0%,100% { opacity: 0.6; transform: scale(1); } 50% { opacity: 1; transform: scale(1.02); } }
+
+body.fx-hasted .fxLayer.hasted { opacity: 1; background: linear-gradient(105deg, transparent 0%, rgba(255,220,80,0.08) 20%, rgba(255,220,80,0.18) 50%, transparent 80%); border-left: 2px solid rgba(255,220,80,0.4); animation: fxHasted 0.6s linear infinite; }
+@keyframes fxHasted { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+
+body.fx-well_fed .fxLayer.well_fed { opacity: 1; background: radial-gradient(ellipse at bottom, rgba(255,180,60,0.22), transparent 60%); border-bottom: 3px solid rgba(255,180,60,0.5); animation: fxWellFed 3s ease-in-out infinite; }
+@keyframes fxWellFed { 0%,100% { opacity: 0.7; } 50% { opacity: 1; } }
+
+body.fx-hydrated .fxLayer.hydrated { opacity: 1; background: linear-gradient(to top, rgba(60,140,255,0.20), transparent 50%); border-bottom: 2px solid rgba(60,140,255,0.5); animation: fxHydrated 2.8s ease-in-out infinite; }
+@keyframes fxHydrated { 0%,100% { opacity: 0.6; } 50% { opacity: 1; } }
+
+body.fx-torchlight .fxLayer.torchlight { opacity: 1; background: radial-gradient(ellipse at center, rgba(255,200,100,0.20), rgba(255,150,40,0.08) 40%, transparent 70%); border: 1px solid rgba(255,180,80,0.4); animation: fxTorchlight 1.5s ease-in-out infinite; }
+@keyframes fxTorchlight { 0%,100% { opacity: 0.8; } 50% { opacity: 1; box-shadow: inset 0 0 40px rgba(255,180,80,0.3); } }
+
+body.fx-titanblood .fxLayer.titanblood { opacity: 1; background: radial-gradient(ellipse at center, rgba(180,20,20,0.25), rgba(120,10,10,0.15) 50%, transparent 80%); border: 2px solid rgba(180,20,20,0.6); animation: fxTitanblood 0.8s ease-in-out infinite; }
+@keyframes fxTitanblood { 0%,100% { transform: scale(1); opacity: 0.8; } 50% { transform: scale(1.02); opacity: 1; } }
+
+body.fx-sunfire .fxLayer.sunfire { opacity: 1; background: radial-gradient(ellipse at 30% 20%, rgba(255,230,80,0.30), rgba(255,160,20,0.18) 30%, transparent 70%); border: 1px solid rgba(255,200,40,0.5); animation: fxSunfire 1.2s ease-in-out infinite; }
+@keyframes fxSunfire { 0%,100% { opacity: 0.7; filter: brightness(1); } 50% { opacity: 1; filter: brightness(1.2); } }
+
+body.fx-voidsalt .fxLayer.voidsalt { opacity: 1; background: radial-gradient(ellipse at center, rgba(80,20,120,0.22), rgba(40,10,60,0.10) 60%, transparent 80%), repeating-linear-gradient(45deg, rgba(120,40,180,0.08) 0 3px, transparent 3px 6px); border: 1px solid rgba(100,40,160,0.5); animation: fxVoidsalt 2s ease-in-out infinite; }
+@keyframes fxVoidsalt { 0%,100% { opacity: 0.7; } 50% { opacity: 1; } }
+
+body.fx-wyrmhide .fxLayer.wyrmhide { opacity: 1; background: repeating-linear-gradient(0deg, rgba(60,140,60,0.10) 0 4px, rgba(40,100,40,0.05) 4px 8px), radial-gradient(ellipse at center, rgba(80,160,80,0.15), transparent 70%); border: 2px solid rgba(60,140,60,0.5); animation: fxWyrmhide 2.5s ease-in-out infinite; }
+@keyframes fxWyrmhide { 0%,100% { opacity: 0.7; } 50% { opacity: 1; } }
+
+body.fx-ironbark .fxLayer.ironbark { opacity: 1; background: repeating-linear-gradient(90deg, rgba(100,70,40,0.12) 0 3px, rgba(80,50,30,0.08) 3px 6px), radial-gradient(ellipse at center, rgba(120,80,50,0.12), transparent 70%); border: 2px solid rgba(100,70,40,0.5); animation: fxIronbark 2.2s ease-in-out infinite; }
+@keyframes fxIronbark { 0%,100% { opacity: 0.75; } 50% { opacity: 1; } }
+
+body.fx-smokeveil .fxLayer.smokeveil { opacity: 1; background: radial-gradient(ellipse at center, rgba(180,180,180,0.18), rgba(120,120,120,0.10) 40%, transparent 70%); border: 1px solid rgba(150,150,150,0.4); animation: fxSmokeveil 3s ease-in-out infinite; }
+@keyframes fxSmokeveil { 0% { opacity: 0.5; transform: translateY(10px); } 50% { opacity: 1; transform: translateY(-5px); } 100% { opacity: 0.5; transform: translateY(10px); } }
+
+body.fx-shadowstep .fxLayer.shadowstep { opacity: 1; background: radial-gradient(ellipse at center, rgba(20,20,40,0.35), rgba(10,10,20,0.20) 50%, transparent 80%); border: 1px solid rgba(80,80,120,0.4); animation: fxShadowstep 2s ease-in-out infinite; }
+@keyframes fxShadowstep { 0%,100% { opacity: 0.6; } 50% { opacity: 0.9; } }
+
+body.fx-mindglass .fxLayer.mindglass { opacity: 1; background: radial-gradient(ellipse at center, rgba(120,200,255,0.15), rgba(80,160,220,0.08) 50%, transparent 80%); backdrop-filter: blur(0.5px); border: 1px solid rgba(120,200,255,0.4); animation: fxMindglass 1.8s ease-in-out infinite; }
+@keyframes fxMindglass { 0%,100% { opacity: 0.7; backdrop-filter: blur(0.5px); } 50% { opacity: 1; backdrop-filter: blur(0px); } }
+
+body.fx-stormseed .fxLayer.stormseed { opacity: 1; background: linear-gradient(180deg, transparent 0%, rgba(255,220,40,0.08) 30%, rgba(255,200,20,0.18) 50%, transparent 80%); border: 1px solid rgba(255,220,40,0.4); animation: fxStormseed 0.4s steps(2) infinite; }
+@keyframes fxStormseed { 0% { opacity: 0.6; } 50% { opacity: 1; } 100% { opacity: 0.6; } }
+
+/* New debuffs with visuals and situations */
+body.fx-weak .fxLayer.weak { opacity: 1; background: linear-gradient(to bottom, rgba(100,100,100,0.15), rgba(60,60,60,0.08)); filter: grayscale(0.4); border-bottom: 2px solid rgba(120,120,120,0.4); animation: fxWeak 2.5s ease-in-out infinite; }
+@keyframes fxWeak { 0%,100% { opacity: 0.7; } 50% { opacity: 1; } }
+
+body.fx-dazed .fxLayer.dazed { opacity: 1; background: radial-gradient(ellipse at center, rgba(200,180,255,0.12), transparent 60%); backdrop-filter: blur(1px); border: 1px dashed rgba(180,160,220,0.4); animation: fxDazed 0.8s ease-in-out infinite; }
+@keyframes fxDazed { 0% { transform: translateX(-2px); } 50% { transform: translateX(2px); } 100% { transform: translateX(-2px); } }
+
+body.fx-drained .fxLayer.drained { opacity: 1; background: linear-gradient(to top, rgba(40,60,120,0.25), transparent 60%); border-bottom: 2px solid rgba(60,80,140,0.5); animation: fxDrained 2s ease-in-out infinite; }
+@keyframes fxDrained { 0%,100% { opacity: 0.6; } 50% { opacity: 1; } }
+
+body.fx-brittle .fxLayer.brittle { opacity: 1; background: repeating-linear-gradient(0deg, transparent 0 2px, rgba(200,200,200,0.08) 2px 4px), repeating-linear-gradient(90deg, transparent 0 2px, rgba(200,200,200,0.08) 2px 4px); border: 1px solid rgba(200,200,200,0.4); animation: fxBrittle 1.5s ease-in-out infinite; }
+@keyframes fxBrittle { 0%,100% { opacity: 0.6; } 50% { opacity: 1; } }
+
+body.fx-frostbitten .fxLayer.frostbitten { opacity: 1; background: radial-gradient(ellipse at center, rgba(120,180,255,0.20), rgba(80,120,200,0.12) 40%, transparent 70%); border: 2px solid rgba(120,180,255,0.5); box-shadow: inset 0 0 30px rgba(120,180,255,0.3); animation: fxFrostbitten 2s ease-in-out infinite; }
+@keyframes fxFrostbitten { 0%,100% { opacity: 0.7; } 50% { opacity: 1; filter: brightness(1.1); } }
+
+body.fx-scorched .fxLayer.scorched { opacity: 1; background: radial-gradient(ellipse at 20% 30%, rgba(255,120,20,0.25), rgba(200,60,10,0.15) 30%, transparent 70%); border: 1px solid rgba(255,100,20,0.5); animation: fxScorched 1s ease-in-out infinite; }
+@keyframes fxScorched { 0%,100% { opacity: 0.7; } 50% { opacity: 1; } }
+
+body.fx-entangled .fxLayer.entangled { opacity: 1; background: repeating-linear-gradient(45deg, rgba(60,140,60,0.10) 0 8px, rgba(40,100,40,0.06) 8px 16px), radial-gradient(ellipse at center, rgba(80,160,60,0.12), transparent 70%); border: 2px solid rgba(60,140,60,0.5); animation: fxEntangled 2.2s ease-in-out infinite; }
+@keyframes fxEntangled { 0%,100% { opacity: 0.7; } 50% { opacity: 1; } }
+
+body.fx-fear .fxLayer.fear { opacity: 1; background: radial-gradient(ellipse at center, transparent 40%, rgba(20,10,40,0.35) 80%); border: 2px solid rgba(80,40,120,0.4); animation: fxFear 0.3s ease-in-out infinite, fxShake 0.5s steps(2) infinite; }
+@keyframes fxFear { 0%,100% { opacity: 0.8; } 50% { opacity: 1; } }
+
+/* Parchment theme overrides for new FX */
+body.theme-parchment.fx-bleeding .fxLayer.bleeding { background: linear-gradient(to top, rgba(180,40,40,0.15), transparent 60%); border-bottom-color: #a44; }
+body.theme-parchment.fx-rested .fxLayer.rested { background: radial-gradient(ellipse at center, rgba(100,160,80,0.12), transparent 70%); }
+body.theme-parchment.fx-cursed .fxLayer.cursed { background: radial-gradient(ellipse at center, rgba(120,80,160,0.12), transparent 60%); }
+body.theme-parchment.fx-poisoned .fxLayer.poisoned { background: linear-gradient(to bottom, transparent, rgba(80,160,60,0.15)); }
+body.theme-parchment.fx-shielded .fxLayer.shielded { background: radial-gradient(ellipse at center, rgba(80,120,180,0.12), transparent 70%); }
+
 .buildBadge { position: fixed; left: 10px; bottom: 10px; z-index: 1100; background: #0a0a0a; border: 1px solid #444; color: #666; padding: 3px 7px; font-size: 10px; font-family: inherit; letter-spacing: 1px; box-shadow: 2px 2px 0 #000; }
 body.theme-colorful .buildBadge { background: rgba(18,26,36,0.9); border: 1px solid rgba(124,92,255,0.3); color: #9fb0c7; border-radius: 999px; backdrop-filter: blur(8px); }
 

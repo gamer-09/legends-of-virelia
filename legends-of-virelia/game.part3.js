@@ -376,8 +376,23 @@ function applyDamage(dmg, opts) {
   if (fx) playHitFx();
   state.hp -= amount;
 
-  if (!o.fromEffect && amount >= 8 && Math.random() < 0.35) {
-    addEffect("bleeding", 15000);
+  if (!o.fromEffect) {
+    if (amount >= 8 && Math.random() < 0.35) {
+      addEffect("bleeding", 15000);
+    }
+    // Heavy damage situations trigger new debuffs
+    const maxHp = playerMaxHp();
+    if (amount >= maxHp * 0.30) {
+      if (Math.random() < 0.45) { addEffect("brittle", 18000); appendLog("💔 Heavy blow - Brittle! Armor cracked."); }
+      if (Math.random() < 0.35) { addEffect("weak", 15000); }
+      if (Math.random() < 0.25) { addEffect("dazed", 12000); }
+    } else if (amount >= maxHp * 0.18) {
+      if (Math.random() < 0.25) { addEffect("dazed", 10000); }
+    }
+    if (amount >= 12 && Math.random() < 0.15) {
+      // Chance for fear on big hit
+      addEffect("fear", 12000);
+    }
   }
   if (state.hp <= 0) {
     state.hp = 0;
