@@ -1874,6 +1874,15 @@ function continueProfile() {
   state = loaded;
   state.updatedAt = nowIso();
   normalizeState(state);
+  // Resume paused effects from previous logout - timer continues
+  try {
+    if (typeof resumeAllEffects === 'function') {
+      const resumed = resumeAllEffects(state);
+      if (resumed > 0) {
+        console.log(`[LOGIN] Resumed ${resumed} paused effects`);
+      }
+    }
+  } catch(e) { console.warn('resume effects failed', e); }
   const exileSeed = (!!state.flags?.["exile:active"] && typeof state.flags?.["exile:seed"] === "number")
     ? (state.flags["exile:seed"] >>> 0)
     : 0;

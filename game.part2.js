@@ -2235,5 +2235,233 @@ function renderAdminTools() {
   container.appendChild(invWrap);
   container.appendChild(skillWrap);
   adminToolsEl.appendChild(container);
+
+  // === ADMIN APPLY EFFECT TO OTHERS ===
+  const effectWrap = document.createElement("div");
+  effectWrap.style.display = "flex";
+  effectWrap.style.flexDirection = "column";
+  effectWrap.style.gap = "10px";
+  effectWrap.style.marginTop = "14px";
+  effectWrap.style.border = "1px solid var(--text-border, #2a2a2a)";
+  effectWrap.style.padding = "10px";
+  effectWrap.style.background = "rgba(0,0,0,0.15)";
+
+  const effectTitle = document.createElement("div");
+  effectTitle.className = "hint";
+  effectTitle.style.marginTop = "0";
+  effectTitle.style.fontWeight = "700";
+  effectTitle.textContent = "Admin: Apply Effect to Others (effects persist through logout and timer resumes)";
+  effectWrap.appendChild(effectTitle);
+
+  const effectDesc = document.createElement("div");
+  effectDesc.className = "hint";
+  effectDesc.style.marginTop = "0";
+  effectDesc.textContent = "Select a user profile, choose an effect, set duration (seconds). Applied effects are saved and will pause on logout and resume with remaining time on next login.";
+  effectWrap.appendChild(effectDesc);
+
+  const profiles = (typeof listSaveProfiles === 'function') ? listSaveProfiles() : [];
+  const profileSel = document.createElement("select");
+  profileSel.id = "adminEffectProfileSel";
+  profileSel.style.minWidth = "180px";
+  for (const prof of profiles) {
+    const opt = document.createElement("option");
+    opt.value = prof;
+    opt.textContent = prof;
+    if (prof === adminEditingProfile) opt.selected = true;
+    profileSel.appendChild(opt);
+  }
+  if (profiles.length === 0) {
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "(no saves)";
+    profileSel.appendChild(opt);
+  }
+
+  const effectKeys = [
+    "bleeding","poisoned","cursed","rested","shielded","aether","hasted","well_fed","hydrated","torchlight",
+    "titanblood","sunfire","voidsalt","wyrmhide","ironbark","smokeveil","shadowstep","mindglass","stormseed",
+    "aether","sunfire","titanblood","wyrmhide","ironbark","voidsalt","sunfire","shadowstep","smokeveil","hasted","well_fed"
+  ];
+  // dedupe
+  const uniqueEffectKeys = [...new Set(effectKeys)].sort();
+  const effectSel = document.createElement("select");
+  effectSel.id = "adminEffectKeySel";
+  effectSel.style.minWidth = "160px";
+  for (const k of uniqueEffectKeys) {
+    const opt = document.createElement("option");
+    opt.value = k;
+    opt.textContent = k;
+    effectSel.appendChild(opt);
+  }
+
+  const effectDurInput = document.createElement("input");
+  effectDurInput.id = "adminEffectDur";
+  effectDurInput.placeholder = "Duration seconds";
+  effectDurInput.value = "15";
+  effectDurInput.style.width = "90px";
+  effectDurInput.type = "number";
+  effectDurInput.min = "1";
+
+  const effectRow = document.createElement("div");
+  effectRow.className = "row";
+  effectRow.style.flexWrap = "wrap";
+  effectRow.style.alignItems = "center";
+  effectRow.appendChild(profileSel);
+  effectRow.appendChild(effectSel);
+  effectRow.appendChild(effectDurInput);
+  effectWrap.appendChild(effectRow);
+
+  const effectBtnRow = document.createElement("div");
+  effectBtnRow.className = "row";
+
+  const btnApplyEffect = document.createElement("button");
+  btnApplyEffect.textContent = "Apply Effect to User";
+  btnApplyEffect.addEventListener("click", () => {
+    const targetProfile = String(profileSel.value || "").trim();
+    const effKey = String(effectSel.value || "").trim();
+    const durSec = parseFloat(effectDurInput.value || "15");
+    const durMs = Math.max(1000, Math.floor((isFinite(durSec) ? durSec : 15) * 1000));
+    if (!targetProfile) { setHomeMsg("Select a target profile"); return; }
+    if (!effKey) { setHomeMsg("Select an effect"); return; }
+    const loadedEff = safeLoad(targetProfile);
+    if (!loadedEff) { setHomeMsg(`No save found for ${targetProfile}`); return; }
+    if (typeof normalizeState === 'function') normalizeState(loadedEff);
+    loadedEff.effects = loadedEff.effects || {};
+    // If target is currently loaded as state, use addEffect else manually set
+    if (state && state.profile === targetProfile) {
+      if (typeof addEffect === 'function') {
+        const prevState = state;
+        // Temporarily set state to loaded? Actually state already is loadedEff if same profile, so use addEffect
+        addEffect(effKey, durMs);
+        loadedEff.effects = state.effects;
+      } else {
+        loadedEff.effects[effKey] = { key: effKey, expiresAt: (typeof nowMs === 'function' ? nowMs() : Date.now()) + durMs };
+      }
+    } else {
+      loadedEff.effects[effKey] = { key: effKey, expiresAt: (typeof nowMs === 'function' ? nowMs() : Date.now()) + durMs };
+      // add tick timers if needed
+      if (effKey === 'bleeding') loadedEff.effects[effKey].nextTickAt = (typeof nowMs === 'function' ? nowMs() : Date.now()) + 5000;
+      if (effKey === 'aether') loadedEff.effects[effKey].nextTickAt = (typeof nowMs === 'function' ? nowMs() : Date.now()) + 4000;
+      if (effKey === 'poisoned') loadedEff.effects[effKey].nextTickAt = (typeof nowMs === 'function' ? nowMs() : Date.now()) + 4000;
+    }
+    loadedEff.updatedAt = (typeof nowIso === 'function' ? nowIso() : new Date().toISOString());
+    const ok = safeSave(targetProfile, loadedEff);
+    if (ok) {
+      setHomeMsg(`Applied ${effKey} (${durSec}s) to ${targetProfile}. Effect will persist through logout and resume.`);
+      // If currently editing that profile, refresh UI
+      if (state && state.profile === targetProfile && typeof renderEffectsUi === 'function') renderEffectsUi();
+      renderHomeSaves();
+      renderAdminTools();
+    } else {
+      setHomeMsg(`Failed to apply effect to ${targetProfile}`);
+    }
+  });
+
+  const btnRemoveEffect = document.createElement("button");
+  btnRemoveEffect.className = "secondary";
+  btnRemoveEffect.textContent = "Remove Effect from User";
+  btnRemoveEffect.addEventListener("click", () => {
+    const targetProfile = String(profileSel.value || "").trim();
+    const effKey = String(effectSel.value || "").trim();
+    if (!targetProfile) { setHomeMsg("Select target"); return; }
+    const loadedEff = safeLoad(targetProfile);
+    if (!loadedEff) { setHomeMsg("No save"); return; }
+    if (loadedEff.effects && loadedEff.effects[effKey]) {
+      delete loadedEff.effects[effKey];
+      loadedEff.updatedAt = (typeof nowIso === 'function' ? nowIso() : new Date().toISOString());
+      safeSave(targetProfile, loadedEff);
+      if (state && state.profile === targetProfile) {
+        if (state.effects && state.effects[effKey]) delete state.effects[effKey];
+        if (typeof renderEffectsUi === 'function') renderEffectsUi();
+      }
+      setHomeMsg(`Removed ${effKey} from ${targetProfile}`);
+      renderAdminTools();
+    } else {
+      setHomeMsg(`${effKey} not active on ${targetProfile}`);
+    }
+  });
+
+  const btnClearEffects = document.createElement("button");
+  btnClearEffects.className = "danger";
+  btnClearEffects.textContent = "Clear All Effects";
+  btnClearEffects.addEventListener("click", () => {
+    const targetProfile = String(profileSel.value || "").trim();
+    if (!targetProfile) return;
+    const loadedEff = safeLoad(targetProfile);
+    if (!loadedEff) return;
+    loadedEff.effects = {};
+    loadedEff.updatedAt = (typeof nowIso === 'function' ? nowIso() : new Date().toISOString());
+    safeSave(targetProfile, loadedEff);
+    if (state && state.profile === targetProfile) {
+      state.effects = {};
+      if (typeof renderEffectsUi === 'function') renderEffectsUi();
+    }
+    setHomeMsg(`Cleared all effects from ${targetProfile}`);
+    renderAdminTools();
+  });
+
+  const btnApplyAll = document.createElement("button");
+  btnApplyAll.className = "secondary";
+  btnApplyAll.textContent = "Apply to ALL Users";
+  btnApplyAll.title = "Apply this effect to every saved profile";
+  btnApplyAll.addEventListener("click", () => {
+    const effKey = String(effectSel.value || "").trim();
+    const durSec = parseFloat(effectDurInput.value || "15");
+    const durMs = Math.max(1000, Math.floor((isFinite(durSec) ? durSec : 15) * 1000));
+    const allProfiles = (typeof listSaveProfiles === 'function') ? listSaveProfiles() : [];
+    let count = 0;
+    for (const prof of allProfiles) {
+      if (prof === ADMIN_PROFILE) continue; // skip admin god
+      const ld = safeLoad(prof);
+      if (!ld) continue;
+      ld.effects = ld.effects || {};
+      ld.effects[effKey] = { key: effKey, expiresAt: (typeof nowMs === 'function' ? nowMs() : Date.now()) + durMs };
+      if (effKey === 'bleeding') ld.effects[effKey].nextTickAt = (typeof nowMs === 'function' ? nowMs() : Date.now()) + 5000;
+      if (effKey === 'aether') ld.effects[effKey].nextTickAt = (typeof nowMs === 'function' ? nowMs() : Date.now()) + 4000;
+      if (effKey === 'poisoned') ld.effects[effKey].nextTickAt = (typeof nowMs === 'function' ? nowMs() : Date.now()) + 4000;
+      ld.updatedAt = (typeof nowIso === 'function' ? nowIso() : new Date().toISOString());
+      if (safeSave(prof, ld)) count++;
+    }
+    setHomeMsg(`Applied ${effKey} to ${count} users`);
+  });
+
+  effectBtnRow.appendChild(btnApplyEffect);
+  effectBtnRow.appendChild(btnRemoveEffect);
+  effectBtnRow.appendChild(btnClearEffects);
+  effectBtnRow.appendChild(btnApplyAll);
+  effectWrap.appendChild(effectBtnRow);
+
+  // Show current effects of selected profile
+  const currentEffDiv = document.createElement("div");
+  currentEffDiv.className = "hint";
+  currentEffDiv.style.whiteSpace = "pre-wrap";
+  currentEffDiv.style.marginTop = "6px";
+  try {
+    const selProf = String(profileSel.value || "").trim();
+    const ld = selProf ? safeLoad(selProf) : null;
+    if (ld && ld.effects) {
+      const effs = Object.values(ld.effects).map(e => {
+        if (!e) return null;
+        const key = e.key;
+        let sec = 0;
+        if (typeof e.pausedRemaining === 'number') sec = Math.ceil(e.pausedRemaining/1000);
+        else if (typeof e.expiresAt === 'number') sec = Math.max(0, Math.ceil((e.expiresAt - (typeof nowMs === 'function' ? nowMs() : Date.now()))/1000));
+        return `${key}: ${sec}s${typeof e.pausedRemaining === 'number' ? ' (paused)' : ''}`;
+      }).filter(Boolean).join(", ");
+      currentEffDiv.textContent = effs ? `Current effects on ${selProf}: ${effs}` : `No active effects on ${selProf}`;
+    } else {
+      currentEffDiv.textContent = selProf ? `No effects on ${selProf}` : "Select a profile to see effects";
+    }
+  } catch(e) {
+    currentEffDiv.textContent = "Could not load effects: " + e;
+  }
+  effectWrap.appendChild(currentEffDiv);
+
+  profileSel.addEventListener("change", () => {
+    renderAdminTools();
+  });
+
+
+  adminToolsEl.appendChild(effectWrap);
   scheduleRestoreFocus();
 }

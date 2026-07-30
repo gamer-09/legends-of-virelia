@@ -339,7 +339,16 @@ function logoutNormalUser() {
   try {
     if (typeof worldTick === 'function') worldTick('Logout');
   } catch {}
-  // Save current if exists?
+  // Pause all active effects so timer resumes on next login
+  try {
+    if (state && typeof pauseAllEffects === 'function') {
+      const pausedCount = pauseAllEffects(state);
+      if (pausedCount > 0) {
+        console.log(`[LOGOUT] Paused ${pausedCount} effects for resume on login`);
+      }
+    }
+  } catch(e) { console.warn('pause effects failed', e); }
+  // Save current if exists - now with paused effects
   if (state && typeof autoSave === 'function') {
     try { autoSave(); } catch {}
   }

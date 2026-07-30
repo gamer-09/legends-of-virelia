@@ -4392,6 +4392,234 @@ function renderAdminTools() {
   container.appendChild(invWrap);
   container.appendChild(skillWrap);
   adminToolsEl.appendChild(container);
+
+  // === ADMIN APPLY EFFECT TO OTHERS ===
+  const effectWrap = document.createElement("div");
+  effectWrap.style.display = "flex";
+  effectWrap.style.flexDirection = "column";
+  effectWrap.style.gap = "10px";
+  effectWrap.style.marginTop = "14px";
+  effectWrap.style.border = "1px solid var(--text-border, #2a2a2a)";
+  effectWrap.style.padding = "10px";
+  effectWrap.style.background = "rgba(0,0,0,0.15)";
+
+  const effectTitle = document.createElement("div");
+  effectTitle.className = "hint";
+  effectTitle.style.marginTop = "0";
+  effectTitle.style.fontWeight = "700";
+  effectTitle.textContent = "Admin: Apply Effect to Others (effects persist through logout and timer resumes)";
+  effectWrap.appendChild(effectTitle);
+
+  const effectDesc = document.createElement("div");
+  effectDesc.className = "hint";
+  effectDesc.style.marginTop = "0";
+  effectDesc.textContent = "Select a user profile, choose an effect, set duration (seconds). Applied effects are saved and will pause on logout and resume with remaining time on next login.";
+  effectWrap.appendChild(effectDesc);
+
+  const profiles = (typeof listSaveProfiles === 'function') ? listSaveProfiles() : [];
+  const profileSel = document.createElement("select");
+  profileSel.id = "adminEffectProfileSel";
+  profileSel.style.minWidth = "180px";
+  for (const prof of profiles) {
+    const opt = document.createElement("option");
+    opt.value = prof;
+    opt.textContent = prof;
+    if (prof === adminEditingProfile) opt.selected = true;
+    profileSel.appendChild(opt);
+  }
+  if (profiles.length === 0) {
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "(no saves)";
+    profileSel.appendChild(opt);
+  }
+
+  const effectKeys = [
+    "bleeding","poisoned","cursed","rested","shielded","aether","hasted","well_fed","hydrated","torchlight",
+    "titanblood","sunfire","voidsalt","wyrmhide","ironbark","smokeveil","shadowstep","mindglass","stormseed",
+    "aether","sunfire","titanblood","wyrmhide","ironbark","voidsalt","sunfire","shadowstep","smokeveil","hasted","well_fed"
+  ];
+  // dedupe
+  const uniqueEffectKeys = [...new Set(effectKeys)].sort();
+  const effectSel = document.createElement("select");
+  effectSel.id = "adminEffectKeySel";
+  effectSel.style.minWidth = "160px";
+  for (const k of uniqueEffectKeys) {
+    const opt = document.createElement("option");
+    opt.value = k;
+    opt.textContent = k;
+    effectSel.appendChild(opt);
+  }
+
+  const effectDurInput = document.createElement("input");
+  effectDurInput.id = "adminEffectDur";
+  effectDurInput.placeholder = "Duration seconds";
+  effectDurInput.value = "15";
+  effectDurInput.style.width = "90px";
+  effectDurInput.type = "number";
+  effectDurInput.min = "1";
+
+  const effectRow = document.createElement("div");
+  effectRow.className = "row";
+  effectRow.style.flexWrap = "wrap";
+  effectRow.style.alignItems = "center";
+  effectRow.appendChild(profileSel);
+  effectRow.appendChild(effectSel);
+  effectRow.appendChild(effectDurInput);
+  effectWrap.appendChild(effectRow);
+
+  const effectBtnRow = document.createElement("div");
+  effectBtnRow.className = "row";
+
+  const btnApplyEffect = document.createElement("button");
+  btnApplyEffect.textContent = "Apply Effect to User";
+  btnApplyEffect.addEventListener("click", () => {
+    const targetProfile = String(profileSel.value || "").trim();
+    const effKey = String(effectSel.value || "").trim();
+    const durSec = parseFloat(effectDurInput.value || "15");
+    const durMs = Math.max(1000, Math.floor((isFinite(durSec) ? durSec : 15) * 1000));
+    if (!targetProfile) { setHomeMsg("Select a target profile"); return; }
+    if (!effKey) { setHomeMsg("Select an effect"); return; }
+    const loadedEff = safeLoad(targetProfile);
+    if (!loadedEff) { setHomeMsg(`No save found for ${targetProfile}`); return; }
+    if (typeof normalizeState === 'function') normalizeState(loadedEff);
+    loadedEff.effects = loadedEff.effects || {};
+    // If target is currently loaded as state, use addEffect else manually set
+    if (state && state.profile === targetProfile) {
+      if (typeof addEffect === 'function') {
+        const prevState = state;
+        // Temporarily set state to loaded? Actually state already is loadedEff if same profile, so use addEffect
+        addEffect(effKey, durMs);
+        loadedEff.effects = state.effects;
+      } else {
+        loadedEff.effects[effKey] = { key: effKey, expiresAt: (typeof nowMs === 'function' ? nowMs() : Date.now()) + durMs };
+      }
+    } else {
+      loadedEff.effects[effKey] = { key: effKey, expiresAt: (typeof nowMs === 'function' ? nowMs() : Date.now()) + durMs };
+      // add tick timers if needed
+      if (effKey === 'bleeding') loadedEff.effects[effKey].nextTickAt = (typeof nowMs === 'function' ? nowMs() : Date.now()) + 5000;
+      if (effKey === 'aether') loadedEff.effects[effKey].nextTickAt = (typeof nowMs === 'function' ? nowMs() : Date.now()) + 4000;
+      if (effKey === 'poisoned') loadedEff.effects[effKey].nextTickAt = (typeof nowMs === 'function' ? nowMs() : Date.now()) + 4000;
+    }
+    loadedEff.updatedAt = (typeof nowIso === 'function' ? nowIso() : new Date().toISOString());
+    const ok = safeSave(targetProfile, loadedEff);
+    if (ok) {
+      setHomeMsg(`Applied ${effKey} (${durSec}s) to ${targetProfile}. Effect will persist through logout and resume.`);
+      // If currently editing that profile, refresh UI
+      if (state && state.profile === targetProfile && typeof renderEffectsUi === 'function') renderEffectsUi();
+      renderHomeSaves();
+      renderAdminTools();
+    } else {
+      setHomeMsg(`Failed to apply effect to ${targetProfile}`);
+    }
+  });
+
+  const btnRemoveEffect = document.createElement("button");
+  btnRemoveEffect.className = "secondary";
+  btnRemoveEffect.textContent = "Remove Effect from User";
+  btnRemoveEffect.addEventListener("click", () => {
+    const targetProfile = String(profileSel.value || "").trim();
+    const effKey = String(effectSel.value || "").trim();
+    if (!targetProfile) { setHomeMsg("Select target"); return; }
+    const loadedEff = safeLoad(targetProfile);
+    if (!loadedEff) { setHomeMsg("No save"); return; }
+    if (loadedEff.effects && loadedEff.effects[effKey]) {
+      delete loadedEff.effects[effKey];
+      loadedEff.updatedAt = (typeof nowIso === 'function' ? nowIso() : new Date().toISOString());
+      safeSave(targetProfile, loadedEff);
+      if (state && state.profile === targetProfile) {
+        if (state.effects && state.effects[effKey]) delete state.effects[effKey];
+        if (typeof renderEffectsUi === 'function') renderEffectsUi();
+      }
+      setHomeMsg(`Removed ${effKey} from ${targetProfile}`);
+      renderAdminTools();
+    } else {
+      setHomeMsg(`${effKey} not active on ${targetProfile}`);
+    }
+  });
+
+  const btnClearEffects = document.createElement("button");
+  btnClearEffects.className = "danger";
+  btnClearEffects.textContent = "Clear All Effects";
+  btnClearEffects.addEventListener("click", () => {
+    const targetProfile = String(profileSel.value || "").trim();
+    if (!targetProfile) return;
+    const loadedEff = safeLoad(targetProfile);
+    if (!loadedEff) return;
+    loadedEff.effects = {};
+    loadedEff.updatedAt = (typeof nowIso === 'function' ? nowIso() : new Date().toISOString());
+    safeSave(targetProfile, loadedEff);
+    if (state && state.profile === targetProfile) {
+      state.effects = {};
+      if (typeof renderEffectsUi === 'function') renderEffectsUi();
+    }
+    setHomeMsg(`Cleared all effects from ${targetProfile}`);
+    renderAdminTools();
+  });
+
+  const btnApplyAll = document.createElement("button");
+  btnApplyAll.className = "secondary";
+  btnApplyAll.textContent = "Apply to ALL Users";
+  btnApplyAll.title = "Apply this effect to every saved profile";
+  btnApplyAll.addEventListener("click", () => {
+    const effKey = String(effectSel.value || "").trim();
+    const durSec = parseFloat(effectDurInput.value || "15");
+    const durMs = Math.max(1000, Math.floor((isFinite(durSec) ? durSec : 15) * 1000));
+    const allProfiles = (typeof listSaveProfiles === 'function') ? listSaveProfiles() : [];
+    let count = 0;
+    for (const prof of allProfiles) {
+      if (prof === ADMIN_PROFILE) continue; // skip admin god
+      const ld = safeLoad(prof);
+      if (!ld) continue;
+      ld.effects = ld.effects || {};
+      ld.effects[effKey] = { key: effKey, expiresAt: (typeof nowMs === 'function' ? nowMs() : Date.now()) + durMs };
+      if (effKey === 'bleeding') ld.effects[effKey].nextTickAt = (typeof nowMs === 'function' ? nowMs() : Date.now()) + 5000;
+      if (effKey === 'aether') ld.effects[effKey].nextTickAt = (typeof nowMs === 'function' ? nowMs() : Date.now()) + 4000;
+      if (effKey === 'poisoned') ld.effects[effKey].nextTickAt = (typeof nowMs === 'function' ? nowMs() : Date.now()) + 4000;
+      ld.updatedAt = (typeof nowIso === 'function' ? nowIso() : new Date().toISOString());
+      if (safeSave(prof, ld)) count++;
+    }
+    setHomeMsg(`Applied ${effKey} to ${count} users`);
+  });
+
+  effectBtnRow.appendChild(btnApplyEffect);
+  effectBtnRow.appendChild(btnRemoveEffect);
+  effectBtnRow.appendChild(btnClearEffects);
+  effectBtnRow.appendChild(btnApplyAll);
+  effectWrap.appendChild(effectBtnRow);
+
+  // Show current effects of selected profile
+  const currentEffDiv = document.createElement("div");
+  currentEffDiv.className = "hint";
+  currentEffDiv.style.whiteSpace = "pre-wrap";
+  currentEffDiv.style.marginTop = "6px";
+  try {
+    const selProf = String(profileSel.value || "").trim();
+    const ld = selProf ? safeLoad(selProf) : null;
+    if (ld && ld.effects) {
+      const effs = Object.values(ld.effects).map(e => {
+        if (!e) return null;
+        const key = e.key;
+        let sec = 0;
+        if (typeof e.pausedRemaining === 'number') sec = Math.ceil(e.pausedRemaining/1000);
+        else if (typeof e.expiresAt === 'number') sec = Math.max(0, Math.ceil((e.expiresAt - (typeof nowMs === 'function' ? nowMs() : Date.now()))/1000));
+        return `${key}: ${sec}s${typeof e.pausedRemaining === 'number' ? ' (paused)' : ''}`;
+      }).filter(Boolean).join(", ");
+      currentEffDiv.textContent = effs ? `Current effects on ${selProf}: ${effs}` : `No active effects on ${selProf}`;
+    } else {
+      currentEffDiv.textContent = selProf ? `No effects on ${selProf}` : "Select a profile to see effects";
+    }
+  } catch(e) {
+    currentEffDiv.textContent = "Could not load effects: " + e;
+  }
+  effectWrap.appendChild(currentEffDiv);
+
+  profileSel.addEventListener("change", () => {
+    renderAdminTools();
+  });
+
+
+  adminToolsEl.appendChild(effectWrap);
   scheduleRestoreFocus();
 }
 const ADMIN_DELETED_FLAG = `virelia_admin_deleted:${ADMIN_PROFILE}`;
@@ -6962,12 +7190,97 @@ function clearEffect(key) {
   renderEffectsUi();
 }
 
+function pauseAllEffects(s) {
+  const target = s || state;
+  if (!target || !target.effects) return 0;
+  const t = nowMs();
+  let count = 0;
+  for (const [k, e] of Object.entries(target.effects)) {
+    if (!e) continue;
+    if (typeof e.pausedRemaining === 'number') continue; // already paused
+    if (typeof e.expiresAt !== 'number') continue;
+    if (e.expiresAt <= t) continue; // already expired
+    const remaining = Math.max(0, e.expiresAt - t);
+    e.pausedRemaining = remaining;
+    e.pausedAt = t;
+    if (typeof e.nextTickAt === 'number' && e.nextTickAt > t) {
+      e.pausedNextTickRemaining = Math.max(0, e.nextTickAt - t);
+    }
+    // mark paused, delete expiresAt to avoid prune during offline, but keep flag
+    e._paused = true;
+    delete e.expiresAt;
+    delete e.nextTickAt;
+    count++;
+  }
+  return count;
+}
+
+function resumeAllEffects(s) {
+  const target = s || state;
+  if (!target || !target.effects) return 0;
+  const t = nowMs();
+  let count = 0;
+  for (const [k, e] of Object.entries(target.effects)) {
+    if (!e) continue;
+    if (typeof e.pausedRemaining !== 'number') continue;
+    const remaining = Math.max(0, Math.floor(e.pausedRemaining));
+    e.expiresAt = t + remaining;
+    if (typeof e.pausedNextTickRemaining === 'number') {
+      e.nextTickAt = t + Math.max(0, Math.floor(e.pausedNextTickRemaining));
+      delete e.pausedNextTickRemaining;
+    } else {
+      // reset tick timers for relevant effects
+      if (k === 'bleeding') e.nextTickAt = t + 5000;
+      else if (k === 'aether') e.nextTickAt = t + 4000;
+      else if (k === 'poisoned') e.nextTickAt = t + 4000;
+    }
+    delete e.pausedRemaining;
+    delete e.pausedAt;
+    delete e._paused;
+    count++;
+  }
+  return count;
+}
+
+function hasPausedEffects(s) {
+  const target = s || state;
+  if (!target || !target.effects) return false;
+  for (const e of Object.values(target.effects)) {
+    if (e && typeof e.pausedRemaining === 'number') return true;
+  }
+  return false;
+}
+
 function activeEffects() {
   if (!state || !state.effects) return [];
   const t = nowMs();
   return Object.values(state.effects)
-    .filter((e) => e && typeof e.expiresAt === "number" && e.expiresAt > t)
-    .sort((a, b) => a.expiresAt - b.expiresAt);
+    .filter((e) => {
+      if (!e) return false;
+      if (typeof e.pausedRemaining === 'number') return true;
+      return typeof e.expiresAt === 'number' && e.expiresAt > t;
+    })
+    .sort((a, b) => {
+      const at = typeof a.expiresAt === 'number' ? a.expiresAt : (typeof a.pausedRemaining === 'number' ? (nowMs()+a.pausedRemaining) : Infinity);
+      const bt = typeof b.expiresAt === 'number' ? b.expiresAt : (typeof b.pausedRemaining === 'number' ? (nowMs()+b.pausedRemaining) : Infinity);
+      return at - bt;
+    });
+}
+
+function activeEffectsForState(s) {
+  if (!s || !s.effects) return [];
+  const t = nowMs();
+  return Object.values(s.effects)
+    .filter((e) => {
+      if (!e) return false;
+      if (typeof e.pausedRemaining === 'number') return true;
+      return typeof e.expiresAt === 'number' && e.expiresAt > t;
+    })
+    .sort((a, b) => {
+      const at = typeof a.expiresAt === 'number' ? a.expiresAt : (typeof a.pausedRemaining === 'number' ? (t+a.pausedRemaining) : Infinity);
+      const bt = typeof b.expiresAt === 'number' ? b.expiresAt : (typeof b.pausedRemaining === 'number' ? (t+b.pausedRemaining) : Infinity);
+      return at - bt;
+    });
 }
 
 let lastEffectsSig = "";
@@ -6992,15 +7305,24 @@ function renderEffectsUi() {
   if (fxBadges) {
     fxBadges.innerHTML = "";
     for (const e of list) {
-      const sec = Math.max(0, Math.ceil((e.expiresAt - t) / 1000));
+      let sec = 0;
+      if (typeof e.pausedRemaining === 'number') sec = Math.max(0, Math.ceil(e.pausedRemaining / 1000));
+      else if (typeof e.expiresAt === 'number') sec = Math.max(0, Math.ceil((e.expiresAt - t) / 1000));
+      const pausedMark = typeof e.pausedRemaining === 'number' ? ' ⏸' : '';
       const div = document.createElement("div");
       div.className = "fxBadge";
-      div.textContent = `${e.key} (${sec}s)`;
+      div.textContent = `${e.key} (${sec}s)${pausedMark}`;
+      div.title = typeof e.pausedRemaining === 'number' ? 'Paused - will resume on login' : '';
       fxBadges.appendChild(div);
     }
   }
 
-  const sig = list.map((e) => `${e.key}:${Math.ceil((e.expiresAt - t) / 1000)}`).join("|");
+  const sig = list.map((e) => {
+    let remaining = 0;
+    if (typeof e.pausedRemaining === 'number') remaining = e.pausedRemaining;
+    else if (typeof e.expiresAt === 'number') remaining = e.expiresAt - t;
+    return `${e.key}:${Math.ceil(remaining/1000)}:${typeof e.pausedRemaining === 'number' ? 'p' : 'a'}`;
+  }).join("|");
   if (sig !== lastEffectsSig) {
     lastEffectsSig = sig;
     renderStats();
@@ -7013,7 +7335,9 @@ function pruneExpiredEffects() {
   let changed = false;
   const expired = [];
   for (const [k, e] of Object.entries(state.effects)) {
-    if (!e || typeof e.expiresAt !== "number" || e.expiresAt <= t) {
+    if (!e) continue;
+    if (typeof e.pausedRemaining === 'number') continue; // don't prune paused effects
+    if (typeof e.expiresAt !== "number" || e.expiresAt <= t) {
       delete state.effects[k];
       changed = true;
       expired.push(k);
@@ -7032,6 +7356,12 @@ function pruneExpiredEffects() {
 
 function tickEffects() {
   if (!state || !state.effects) return;
+  // If any paused effects exist in current state, skip ticking (paused during offline handling)
+  // But if current state is active (not paused), resume logic already applied, so we tick normally
+  // Check if effects are paused - if so, skip ticks
+  let hasPaused = false;
+  for (const e of Object.values(state.effects)) { if (e && typeof e.pausedRemaining === 'number') { hasPaused = true; break; } }
+  if (hasPaused) return; // paused effects don't tick
   pruneExpiredEffects();
   const t = nowMs();
 
@@ -11218,6 +11548,15 @@ function continueProfile() {
   state = loaded;
   state.updatedAt = nowIso();
   normalizeState(state);
+  // Resume paused effects from previous logout - timer continues
+  try {
+    if (typeof resumeAllEffects === 'function') {
+      const resumed = resumeAllEffects(state);
+      if (resumed > 0) {
+        console.log(`[LOGIN] Resumed ${resumed} paused effects`);
+      }
+    }
+  } catch(e) { console.warn('resume effects failed', e); }
   const exileSeed = (!!state.flags?.["exile:active"] && typeof state.flags?.["exile:seed"] === "number")
     ? (state.flags["exile:seed"] >>> 0)
     : 0;
@@ -14927,7 +15266,16 @@ function logoutNormalUser() {
   try {
     if (typeof worldTick === 'function') worldTick('Logout');
   } catch {}
-  // Save current if exists?
+  // Pause all active effects so timer resumes on next login
+  try {
+    if (state && typeof pauseAllEffects === 'function') {
+      const pausedCount = pauseAllEffects(state);
+      if (pausedCount > 0) {
+        console.log(`[LOGOUT] Paused ${pausedCount} effects for resume on login`);
+      }
+    }
+  } catch(e) { console.warn('pause effects failed', e); }
+  // Save current if exists - now with paused effects
   if (state && typeof autoSave === 'function') {
     try { autoSave(); } catch {}
   }

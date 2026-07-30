@@ -159,12 +159,97 @@ function clearEffect(key) {
   renderEffectsUi();
 }
 
+function pauseAllEffects(s) {
+  const target = s || state;
+  if (!target || !target.effects) return 0;
+  const t = nowMs();
+  let count = 0;
+  for (const [k, e] of Object.entries(target.effects)) {
+    if (!e) continue;
+    if (typeof e.pausedRemaining === 'number') continue; // already paused
+    if (typeof e.expiresAt !== 'number') continue;
+    if (e.expiresAt <= t) continue; // already expired
+    const remaining = Math.max(0, e.expiresAt - t);
+    e.pausedRemaining = remaining;
+    e.pausedAt = t;
+    if (typeof e.nextTickAt === 'number' && e.nextTickAt > t) {
+      e.pausedNextTickRemaining = Math.max(0, e.nextTickAt - t);
+    }
+    // mark paused, delete expiresAt to avoid prune during offline, but keep flag
+    e._paused = true;
+    delete e.expiresAt;
+    delete e.nextTickAt;
+    count++;
+  }
+  return count;
+}
+
+function resumeAllEffects(s) {
+  const target = s || state;
+  if (!target || !target.effects) return 0;
+  const t = nowMs();
+  let count = 0;
+  for (const [k, e] of Object.entries(target.effects)) {
+    if (!e) continue;
+    if (typeof e.pausedRemaining !== 'number') continue;
+    const remaining = Math.max(0, Math.floor(e.pausedRemaining));
+    e.expiresAt = t + remaining;
+    if (typeof e.pausedNextTickRemaining === 'number') {
+      e.nextTickAt = t + Math.max(0, Math.floor(e.pausedNextTickRemaining));
+      delete e.pausedNextTickRemaining;
+    } else {
+      // reset tick timers for relevant effects
+      if (k === 'bleeding') e.nextTickAt = t + 5000;
+      else if (k === 'aether') e.nextTickAt = t + 4000;
+      else if (k === 'poisoned') e.nextTickAt = t + 4000;
+    }
+    delete e.pausedRemaining;
+    delete e.pausedAt;
+    delete e._paused;
+    count++;
+  }
+  return count;
+}
+
+function hasPausedEffects(s) {
+  const target = s || state;
+  if (!target || !target.effects) return false;
+  for (const e of Object.values(target.effects)) {
+    if (e && typeof e.pausedRemaining === 'number') return true;
+  }
+  return false;
+}
+
 function activeEffects() {
   if (!state || !state.effects) return [];
   const t = nowMs();
   return Object.values(state.effects)
-    .filter((e) => e && typeof e.expiresAt === "number" && e.expiresAt > t)
-    .sort((a, b) => a.expiresAt - b.expiresAt);
+    .filter((e) => {
+      if (!e) return false;
+      if (typeof e.pausedRemaining === 'number') return true;
+      return typeof e.expiresAt === 'number' && e.expiresAt > t;
+    })
+    .sort((a, b) => {
+      const at = typeof a.expiresAt === 'number' ? a.expiresAt : (typeof a.pausedRemaining === 'number' ? (nowMs()+a.pausedRemaining) : Infinity);
+      const bt = typeof b.expiresAt === 'number' ? b.expiresAt : (typeof b.pausedRemaining === 'number' ? (nowMs()+b.pausedRemaining) : Infinity);
+      return at - bt;
+    });
+}
+
+function activeEffectsForState(s) {
+  if (!s || !s.effects) return [];
+  const t = nowMs();
+  return Object.values(s.effects)
+    .filter((e) => {
+      if (!e) return false;
+      if (typeof e.pausedRemaining === 'number') return true;
+      return typeof e.expiresAt === 'number' && e.expiresAt > t;
+    })
+    .sort((a, b) => {
+      const at = typeof a.expiresAt === 'number' ? a.expiresAt : (typeof a.pausedRemaining === 'number' ? (t+a.pausedRemaining) : Infinity);
+      const bt = typeof b.expiresAt === 'number' ? b.expiresAt : (typeof b.pausedRemaining === 'number' ? (t+b.pausedRemaining) : Infinity);
+      return at - bt;
+    });
 }
 
 let lastEffectsSig = "";
@@ -189,15 +274,24 @@ function renderEffectsUi() {
   if (fxBadges) {
     fxBadges.innerHTML = "";
     for (const e of list) {
-      const sec = Math.max(0, Math.ceil((e.expiresAt - t) / 1000));
+      let sec = 0;
+      if (typeof e.pausedRemaining === 'number') sec = Math.max(0, Math.ceil(e.pausedRemaining / 1000));
+      else if (typeof e.expiresAt === 'number') sec = Math.max(0, Math.ceil((e.expiresAt - t) / 1000));
+      const pausedMark = typeof e.pausedRemaining === 'number' ? ' ⏸' : '';
       const div = document.createElement("div");
       div.className = "fxBadge";
-      div.textContent = `${e.key} (${sec}s)`;
+      div.textContent = `${e.key} (${sec}s)${pausedMark}`;
+      div.title = typeof e.pausedRemaining === 'number' ? 'Paused - will resume on login' : '';
       fxBadges.appendChild(div);
     }
   }
 
-  const sig = list.map((e) => `${e.key}:${Math.ceil((e.expiresAt - t) / 1000)}`).join("|");
+  const sig = list.map((e) => {
+    let remaining = 0;
+    if (typeof e.pausedRemaining === 'number') remaining = e.pausedRemaining;
+    else if (typeof e.expiresAt === 'number') remaining = e.expiresAt - t;
+    return `${e.key}:${Math.ceil(remaining/1000)}:${typeof e.pausedRemaining === 'number' ? 'p' : 'a'}`;
+  }).join("|");
   if (sig !== lastEffectsSig) {
     lastEffectsSig = sig;
     renderStats();
@@ -210,7 +304,9 @@ function pruneExpiredEffects() {
   let changed = false;
   const expired = [];
   for (const [k, e] of Object.entries(state.effects)) {
-    if (!e || typeof e.expiresAt !== "number" || e.expiresAt <= t) {
+    if (!e) continue;
+    if (typeof e.pausedRemaining === 'number') continue; // don't prune paused effects
+    if (typeof e.expiresAt !== "number" || e.expiresAt <= t) {
       delete state.effects[k];
       changed = true;
       expired.push(k);
@@ -229,6 +325,12 @@ function pruneExpiredEffects() {
 
 function tickEffects() {
   if (!state || !state.effects) return;
+  // If any paused effects exist in current state, skip ticking (paused during offline handling)
+  // But if current state is active (not paused), resume logic already applied, so we tick normally
+  // Check if effects are paused - if so, skip ticks
+  let hasPaused = false;
+  for (const e of Object.values(state.effects)) { if (e && typeof e.pausedRemaining === 'number') { hasPaused = true; break; } }
+  if (hasPaused) return; // paused effects don't tick
   pruneExpiredEffects();
   const t = nowMs();
 
