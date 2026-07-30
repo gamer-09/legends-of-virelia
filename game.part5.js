@@ -1002,7 +1002,44 @@ const STORY = {
         });
       }
 
-      for (const r of ALCHEMIST_RECIPES) {
+      // Cure services - every effect now has a cure person/item
+      out.push({
+        label: "Buy Antidote Cure (8g) - cures poisoned/cursed/bleeding",
+        next: "alchemist",
+        disabled: !met || (!isAdminProfile(s.profile) && (s.gold || 0) < 8),
+        effect: () => {
+          if (!spendGold(8)) return;
+          const had = [];
+          if (hasEffectOnState(s, "poisoned")) { clearEffect("poisoned"); had.push("poisoned"); }
+          if (hasEffectOnState(s, "cursed")) { clearEffect("cursed"); had.push("cursed"); }
+          if (hasEffectOnState(s, "bleeding") && Math.random() < 0.7) { clearEffect("bleeding"); had.push("bleeding"); }
+          if (s.effects) {
+            for (const k of ["poisoned","cursed","bleeding"]) if (s.effects[k]?.pausedRemaining) delete s.effects[k];
+          }
+          appendLog(had.length ? `Alchemist brews a bitter draught. Cured: ${had.join(", ")}.` : "Alchemist gives you a cleansing tonic.");
+        },
+      });
+      out.push({
+        label: "Buy Purification Draught (18g) - cures ALL + permanent",
+        next: "alchemist",
+        disabled: !met || (!isAdminProfile(s.profile) && (s.gold || 0) < 18),
+        effect: () => {
+          if (!spendGold(18)) return;
+          const cleared = [];
+          for (const k of ["bleeding","poisoned","cursed"]) {
+            if (hasEffectOnState(s,k) || (s.effects && s.effects[k])) { clearEffect(k); if (s.effects) delete s.effects[k]; cleared.push(k); }
+          }
+          if (s.effects) {
+            for (const k of Object.keys(s.effects)) {
+              if (s.effects[k]?.permanent) { delete s.effects[k]; cleared.push(k+"(perm)"); }
+            }
+          }
+          addEffect("rested", 8000);
+          appendLog(cleared.length ? `Purification Draught glows. Cleansed: ${cleared.join(", ")} + Rested.` : "You drink the draught - refreshed + Rested.");
+        },
+      });
+
+            for (const r of ALCHEMIST_RECIPES) {
         const reqLine = Object.entries(r.req || {}).map(([k, v]) => `${itemLabel(k)} x${v}`).join(", ") || "(none)";
         const can = met && canCraftRecipe(s, r);
         out.push({
@@ -1040,7 +1077,43 @@ const STORY = {
         });
       }
 
-      for (const r of ENCHANTER_RECIPES) {
+      // Enchanter can cure cursed - even permanent cursed needs someone
+      out.push({
+        label: "Request Curse Removal (15g) - enchanter ritual",
+        next: "enchanter",
+        disabled: !met || (!isAdminProfile(s.profile) && (s.gold || 0) < 15),
+        effect: () => {
+          if (!spendGold(15)) return;
+          const had = hasEffectOnState(s, "cursed");
+          clearEffect("cursed");
+          if (s.effects && s.effects["cursed"]) delete s.effects["cursed"];
+          if (s.effects) {
+            for (const k of Object.keys(s.effects)) {
+              if (k.toLowerCase().includes("cursed") || s.effects[k]?.permanent) {
+                if (k === "cursed" || s.effects[k]?.permanent) delete s.effects[k];
+              }
+            }
+          }
+          addEffect("voidsalt", 10000);
+          addEffect("shielded", 8000);
+          appendLog(had ? "Enchanter traces cold fire around you. Curse lifts - Void Salt + Shielded." : "Enchanter wards you - Void Salt + Shielded.");
+        },
+      });
+      out.push({
+        label: "Blessing of Clarity (12g) - cures mental + mindglass",
+        next: "enchanter",
+        disabled: !met || (!isAdminProfile(s.profile) && (s.gold || 0) < 12),
+        effect: () => {
+          if (!spendGold(12)) return;
+          const toClear = ["cursed","smokeveil","shadowstep"];
+          let cleared = [];
+          for (const k of toClear) if (hasEffectOnState(s,k) || (s.effects&&s.effects[k])) { clearEffect(k); if (s.effects) delete s.effects[k]; cleared.push(k); }
+          addEffect("mindglass", 12000);
+          appendLog(cleared.length ? `Enchanter clears your mind: ${cleared.join(", ")} + Mindglass.` : "Enchanter grants Mindglass.");
+        },
+      });
+
+            for (const r of ENCHANTER_RECIPES) {
         const reqLine = Object.entries(r.req || {}).map(([k, v]) => `${itemLabel(k)} x${v}`).join(", ") || "(none)";
         const can = met && canCraftRecipe(s, r);
         out.push({
@@ -1118,15 +1191,70 @@ const STORY = {
       }
 
       out.push({
-        label: "Cure ailments (12g)",
+        label: "Cure ailments (12g) - bleeding/poisoned/cursed",
         next: "healer",
         disabled: !met || (!isAdminProfile(s.profile) && (s.gold || 0) < 12),
         effect: () => {
           if (!spendGold(12)) return;
+          const had = [];
+          if (hasEffectOnState(s, "bleeding")) had.push("bleeding");
+          if (hasEffectOnState(s, "poisoned")) had.push("poisoned");
+          if (hasEffectOnState(s, "cursed")) had.push("cursed");
           clearEffect("bleeding");
           clearEffect("poisoned");
           clearEffect("cursed");
-          appendLog("The healer murmurs a prayer. The worst of it fades.");
+          // Also clear paused versions
+          if (s.effects) {
+            for (const k of ["bleeding","poisoned","cursed"]) {
+              if (s.effects[k] && s.effects[k].pausedRemaining) delete s.effects[k];
+            }
+          }
+          if (had.length) appendLog(`The healer murmurs a prayer. Cured: ${had.join(", ")}.`);
+          else appendLog("The healer checks you - no major ailments found.");
+        },
+      });
+      out.push({
+        label: "Purify Curse (20g) - removes permanent cursed",
+        next: "healer",
+        disabled: !met || (!isAdminProfile(s.profile) && (s.gold || 0) < 20),
+        effect: () => {
+          if (!spendGold(20)) return;
+          const hadCursed = hasEffectOnState(s, "cursed");
+          const hadOther = hasEffectOnState(s, "bleeding") || hasEffectOnState(s, "poisoned");
+          clearEffect("cursed");
+          clearEffect("bleeding");
+          clearEffect("poisoned");
+          if (s.effects) {
+            for (const k of Object.keys(s.effects)) {
+              if (k.includes("cursed") || s.effects[k]?.permanent) delete s.effects[k];
+            }
+            // clear any paused cursed
+            if (s.effects["cursed"]) delete s.effects["cursed"];
+          }
+          addEffect("shielded", 10000);
+          appendLog(hadCursed ? "The healer burns incense, chants, and the curse lifts with a cold snap. + Shielded." : "The healer performs a purification - you feel lighter. + Shielded.");
+        },
+      });
+      out.push({
+        label: "Cleanse All (25g) - removes ALL negative effects",
+        next: "healer",
+        disabled: !met || (!isAdminProfile(s.profile) && (s.gold || 0) < 25),
+        effect: () => {
+          if (!spendGold(25)) return;
+          const toClear = ["bleeding","poisoned","cursed"];
+          let cleared = [];
+          for (const k of toClear) {
+            if (hasEffectOnState(s, k) || (s.effects && s.effects[k])) { cleared.push(k); clearEffect(k); if (s.effects && s.effects[k]) delete s.effects[k]; }
+          }
+          // Clear any debuff that is negative
+          if (s.effects) {
+            for (const k of Object.keys(s.effects)) {
+              if (["bleeding","poisoned","cursed"].includes(k)) delete s.effects[k];
+            }
+          }
+          addEffect("rested", 12000);
+          addEffect("aether", 8000);
+          appendLog(cleared.length ? `The healer uses rare herbs. Cleansed: ${cleared.join(", ")} + Rested + Aether.` : "The healer cleanses you - Rested + Aether.");
         },
       });
       out.push({

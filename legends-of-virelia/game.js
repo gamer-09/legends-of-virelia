@@ -1712,21 +1712,37 @@ function effectBonusForStat(s, statKey) {
   const k = String(statKey || "").trim().toLowerCase();
   if (!k) return 0;
   let bonus = 0;
-  if (k === "strength" && hasEffectOnState(s, "titanblood")) bonus += 0.06;
-  if (k === "arcana" && hasEffectOnState(s, "sunfire")) bonus += 0.06;
-  if (k === "arcana" && hasEffectOnState(s, "mindglass")) bonus += 0.04;
-  if (k === "cunning" && hasEffectOnState(s, "shadowstep")) bonus += 0.06;
-  if (k === "cunning" && hasEffectOnState(s, "mindglass")) bonus += 0.04;
-  if (k === "cunning" && hasEffectOnState(s, "smokeveil")) bonus += 0.04;
-  if (k === "resilience" && hasEffectOnState(s, "ironbark")) bonus += 0.06;
-  if (k === "resilience" && hasEffectOnState(s, "wyrmhide")) bonus += 0.04;
-  if (k === "resilience" && hasEffectOnState(s, "voidsalt")) bonus += 0.03;
-  if (k === "cunning" && hasEffectOnState(s, "torchlight")) bonus += 0.02;
-  if (k === "cunning" && hasEffectOnState(s, "hasted")) bonus += 0.02;
-  if (k === "resilience" && hasEffectOnState(s, "hydrated")) bonus += 0.01;
-  if (k === "resilience" && hasEffectOnState(s, "well_fed")) bonus += 0.01;
-  if (hasEffectOnState(s, "rested")) bonus += 0.01;
-  return clamp(bonus, 0, 0.12);
+  // Strong impactful bonuses - each effect now does something noticeable
+  if (k === "strength" && hasEffectOnState(s, "titanblood")) bonus += 0.14; // +14% str checks, + damage
+  if (k === "strength" && hasEffectOnState(s, "rested")) bonus += 0.03;
+  if (k === "cunning" && hasEffectOnState(s, "rested")) bonus += 0.03;
+  if (k === "arcana" && hasEffectOnState(s, "rested")) bonus += 0.03;
+  if (k === "resilience" && hasEffectOnState(s, "rested")) bonus += 0.03;
+
+  if (k === "arcana" && hasEffectOnState(s, "sunfire")) bonus += 0.12;
+  if (k === "arcana" && hasEffectOnState(s, "mindglass")) bonus += 0.10;
+  if (k === "cunning" && hasEffectOnState(s, "shadowstep")) bonus += 0.14;
+  if (k === "cunning" && hasEffectOnState(s, "mindglass")) bonus += 0.08;
+  if (k === "cunning" && hasEffectOnState(s, "smokeveil")) bonus += 0.08;
+  if (k === "resilience" && hasEffectOnState(s, "ironbark")) bonus += 0.12;
+  if (k === "resilience" && hasEffectOnState(s, "wyrmhide")) bonus += 0.10;
+  if (k === "resilience" && hasEffectOnState(s, "voidsalt")) bonus += 0.08;
+  if (k === "cunning" && hasEffectOnState(s, "torchlight")) bonus += 0.08;
+  if (k === "cunning" && hasEffectOnState(s, "hasted")) bonus += 0.12;
+  if (k === "strength" && hasEffectOnState(s, "hasted")) bonus += 0.05;
+  if (k === "resilience" && hasEffectOnState(s, "hydrated")) bonus += 0.06;
+  if (k === "resilience" && hasEffectOnState(s, "well_fed")) bonus += 0.06;
+  if (k === "cunning" && hasEffectOnState(s, "stormseed")) bonus += 0.06;
+  if (k === "strength" && hasEffectOnState(s, "stormseed")) bonus += 0.08;
+  if (k === "arcana" && hasEffectOnState(s, "aether")) bonus += 0.04;
+
+  // Debuffs reduce stats
+  if (k === "strength" && hasEffectOnState(s, "bleeding")) bonus -= 0.05;
+  if (k === "resilience" && hasEffectOnState(s, "poisoned")) bonus -= 0.06;
+  if (k === "arcana" && hasEffectOnState(s, "cursed")) bonus -= 0.10;
+  if (k === "cunning" && hasEffectOnState(s, "cursed")) bonus -= 0.05;
+
+  return clamp(bonus, -0.15, 0.22);
 }
 
 function useItem(itemKey, ev, targetId) {
@@ -2037,9 +2053,16 @@ function useItem(itemKey, ev, targetId) {
   if (k === "bandage") {
     const heal = 18 + res * 2;
     state.hp = Math.min(playerMaxHp(), (state.hp || 0) + heal);
-    clearEffect("bleeding");
-    addEffect("shielded", 14000);
-    logLine(`🩹 You use a bandage (+${heal} HP).`);
+    const hadBleedPerm = !!(state.effects && state.effects["bleeding"]?.permanent);
+    if (hadBleedPerm && Math.random() < 0.5) {
+      // 50% chance bandage fails on permanent
+      logLine(`🩹 Bandage (+${heal} HP) but deep bleeding persists - need Healer or Wyrmhide/Elixir!`);
+    } else {
+      clearEffect("bleeding");
+      if (state.effects) delete state.effects["bleeding"];
+      addEffect("shielded", 14000);
+      logLine(hadBleedPerm ? `🩹 Bandage (+${heal} HP) miraculously stops PERMANENT bleeding! + Shielded.` : `🩹 You use a bandage (+${heal} HP) + Shielded.`);
+    }
   } else if (k === "health_potion") {
     const heal = 26 + res * 3;
     state.hp = Math.min(playerMaxHp(), (state.hp || 0) + heal);
@@ -2065,19 +2088,36 @@ function useItem(itemKey, ev, targetId) {
   } else if (k === "antidote") {
     const hadP = hasEffectOnState(state, "poisoned");
     const hadC = hasEffectOnState(state, "cursed");
+    const hadB = hasEffectOnState(state, "bleeding");
+    const hadAny = hadP || hadC || hadB;
     clearEffect("poisoned");
     clearEffect("cursed");
-    logLine((hadP || hadC) ? "🧴 You take an antidote. The sickness fades." : "🧴 You take an antidote." );
+    // Antidote now also helps bleeding slightly and can cure permanent if used twice
+    if (hadB && Math.random() < 0.6) clearEffect("bleeding");
+    // Clear paused versions too
+    if (state.effects) {
+      for (const kk of ["poisoned","cursed"]) if (state.effects[kk]?.pausedRemaining) delete state.effects[kk];
+    }
+    logLine(hadAny ? "🧴 You take an antidote. Ailments fade - poisoned/cursed cleared, bleeding may stop." : "🧴 You take an antidote - you feel clearer." );
   } else if (k === "elixir") {
     const heal = Math.max(12, Math.floor(18 + res * 1.6));
     const gain = Math.max(10, Math.floor(14 + arc * 1.6));
     state.hp = Math.min(playerMaxHp(), (state.hp || 0) + heal);
     state.mana = Math.min(playerMaxMana(), (state.mana || 0) + gain);
-    clearEffect("bleeding");
-    clearEffect("poisoned");
-    clearEffect("cursed");
+    // Elixir now cures ALL negative effects and can cure permanent cursed
+    const cured = [];
+    for (const deb of ["bleeding","poisoned","cursed"]) {
+      if (hasEffectOnState(state, deb) || (state.effects && state.effects[deb])) { clearEffect(deb); if (state.effects) delete state.effects[deb]; cured.push(deb); }
+    }
+    // Also clear any permanent flag
+    if (state.effects) {
+      for (const kk of Object.keys(state.effects)) {
+        if (state.effects[kk]?.permanent) { delete state.effects[kk]; cured.push(kk+"(perm)"); }
+      }
+    }
     addEffect("rested", 10000);
-    logLine(`✨ You drink an elixir (+${heal} HP, +${gain} mana).`);
+    addEffect("aether", 8000);
+    logLine(cured.length ? `✨ You drink an elixir (+${heal} HP, +${gain} mana). Cured: ${cured.join(", ")} + Rested + Aether.` : `✨ You drink an elixir (+${heal} HP, +${gain} mana) + Rested.`);
   } else if (k === "ration") {
     const heal = Math.max(2, Math.floor(4 + res * 0.4));
     state.hp = Math.min(playerMaxHp(), (state.hp || 0) + heal);
@@ -2121,11 +2161,19 @@ function useItem(itemKey, ev, targetId) {
   } else if (k === "voidsalt_ampoule") {
     addEffect("voidsalt", 14000);
     clearEffect("cursed");
-    logLine("🜂 Voidsalt numbs pain and stills fear." );
+    if (state.effects && state.effects["cursed"]?.permanent) { delete state.effects["cursed"]; logLine("🜂 Voidsalt shatters a PERMANENT curse!"); }
+    logLine("🜂 Voidsalt numbs pain and stills fear - cures cursed." );
   } else if (k === "wyrmhide_tonic") {
     addEffect("wyrmhide", 15000);
-    clearEffect("bleeding");
-    logLine("🐉 Wyrmhide toughens your skin." );
+    // Wyrmhide can cure even permanent bleeding
+    if (state.effects && state.effects["bleeding"]) {
+      const wasPerm = !!state.effects["bleeding"].permanent;
+      clearEffect("bleeding");
+      delete state.effects["bleeding"];
+      logLine(wasPerm ? "🐉 Wyrmhide heals DEEP permanent bleeding! Skin hardens." : "🐉 Wyrmhide toughens your skin - bleeding stopped.");
+    } else {
+      logLine("🐉 Wyrmhide toughens your skin.");
+    }
   } else if (k === "aether_salve") {
     const heal = Math.max(6, Math.floor(12 + res * 1.0));
     state.hp = Math.min(playerMaxHp(), (state.hp || 0) + heal);
@@ -6379,7 +6427,18 @@ function partyAutoAttack(ev) {
   const target = enemies[0];
 
   let boost = (ev.partyDmgBoostTurns || 0) > 0 ? (1 + (ev.partyDmgBoost || 0)) : 1;
-  if (hasEffectOnState(state, "stormseed")) boost *= 1.12;
+  // Effects now do something meaningful in combat
+  if (hasEffectOnState(state, "stormseed")) boost *= 1.18;
+  if (hasEffectOnState(state, "titanblood")) boost *= 1.22;
+  if (hasEffectOnState(state, "sunfire")) boost *= 1.14;
+  if (hasEffectOnState(state, "hasted")) boost *= 1.15;
+  if (hasEffectOnState(state, "mindglass")) boost *= 1.08;
+  if (hasEffectOnState(state, "shadowstep")) boost *= 1.10;
+  if (hasEffectOnState(state, "smokeveil")) boost *= 1.05;
+  if (hasEffectOnState(state, "aether")) boost *= 1.06;
+  if (hasEffectOnState(state, "well_fed")) boost *= 1.04;
+  if (hasEffectOnState(state, "cursed")) boost *= 0.88; // cursed weakens
+
 
   const actors = allPartyActors(state);
   for (const a of actors) {
@@ -6475,7 +6534,25 @@ function enemiesAttack(ev) {
 
     const tId = targets[Math.floor(Math.random() * targets.length)];
     const accMod = ((e.accModTurns || 0) > 0 && typeof e.accMod === "number") ? e.accMod : 0;
-    const acc = clamp((e.acc || 0.7) + accMod, 0.25, 0.95);
+    let acc = clamp((e.acc || 0.7) + accMod, 0.25, 0.95);
+    // Effects now do something - defensive buffs reduce enemy accuracy
+    if (tId === "player") {
+      if (hasEffectOnState(state, "shadowstep")) acc = clamp(acc - 0.20, 0.15, 0.95);
+      if (hasEffectOnState(state, "smokeveil")) acc = clamp(acc - 0.15, 0.15, 0.95);
+      if (hasEffectOnState(state, "shielded")) acc = clamp(acc - 0.08, 0.15, 0.95);
+      if (hasEffectOnState(state, "hasted")) acc = clamp(acc - 0.10, 0.15, 0.95);
+      if (hasEffectOnState(state, "torchlight")) acc = clamp(acc - 0.05, 0.15, 0.95);
+      if (hasEffectOnState(state, "mindglass")) acc = clamp(acc - 0.06, 0.15, 0.95);
+      if (hasEffectOnState(state, "wyrmhide")) acc = clamp(acc - 0.04, 0.15, 0.95);
+      // Ruins darkness: without torchlight effect and without torch item, enemy gets bonus, you get penalty (already logged)
+      // With torchlight, you get bonus
+      if (state && state.nodeId === "ruins" && hasEffectOnState(state, "torchlight")) {
+        acc = clamp(acc - 0.12, 0.15, 0.95); // torchlight makes you harder to hit in ruins
+      }
+    }
+    // Offensive debuffs on player make them easier to hit
+    if (hasEffectOnState(state, "cursed")) acc = clamp(acc + 0.08, 0.15, 0.98);
+    if (hasEffectOnState(state, "bleeding")) acc = clamp(acc + 0.04, 0.15, 0.98);
     const hit = Math.random() < acc;
     if (!hit) {
       pushCombatLog(ev, `❌ ${e.name} attacks ${tId === "player" ? state.profile : (findPartyMemberById(state, tId)?.name || "a companion")} and misses.`);
@@ -6680,7 +6757,17 @@ function combatPlayerAction(action) {
     if (isCrossroadsSiegeCombat(ev)) {
       pushCombatLog(ev, "❌ There is no escape — this is your town." );
     } else {
-      const extra = (ev.escapeBoostTurns || 0) > 0 ? (ev.escapeBoost || 0) : 0;
+      let extra = (ev.escapeBoostTurns || 0) > 0 ? (ev.escapeBoost || 0) : 0;
+      // Effects give escape bonuses - now they do something
+      if (hasEffectOnState(state, "hasted")) extra += 0.18;
+      if (hasEffectOnState(state, "shadowstep")) extra += 0.25;
+      if (hasEffectOnState(state, "smokeveil")) extra += 0.20;
+      if (hasEffectOnState(state, "stormseed")) extra += 0.12;
+      if (hasEffectOnState(state, "torchlight")) extra += 0.08;
+      if (hasEffectOnState(state, "mindglass")) extra += 0.06;
+      if (hasEffectOnState(state, "cursed")) extra -= 0.10; // cursed makes escape harder
+      if (hasEffectOnState(state, "bleeding")) extra -= 0.05;
+
       const chance = clamp(0.42 + playerStat("cunning") * 0.03 + extra, 0.25, 0.93);
       const ok = Math.random() < chance;
       if ((ev.escapeBoostTurns || 0) > 0) {
@@ -7211,10 +7298,11 @@ function addEffect(key, durationMs) {
   const t = nowMs();
   const wasActive = !!prev && typeof prev.expiresAt === "number" && prev.expiresAt > t;
   const existing = prev || { key };
-  state.effects[key] = {
+    state.effects[key] = {
     ...existing,
     key,
     expiresAt: t + ms,
+    appliedAt: t,
   };
   if (key === "bleeding" && typeof state.effects[key].nextTickAt !== "number") {
     state.effects[key].nextTickAt = t + 5000;
@@ -7304,6 +7392,7 @@ function activeEffects() {
   return Object.values(state.effects)
     .filter((e) => {
       if (!e) return false;
+      if (e.permanent) return true;
       if (typeof e.pausedRemaining === 'number') return true;
       return typeof e.expiresAt === 'number' && e.expiresAt > t;
     })
@@ -7320,6 +7409,7 @@ function activeEffectsForState(s) {
   return Object.values(s.effects)
     .filter((e) => {
       if (!e) return false;
+      if (e.permanent) return true;
       if (typeof e.pausedRemaining === 'number') return true;
       return typeof e.expiresAt === 'number' && e.expiresAt > t;
     })
@@ -7353,13 +7443,25 @@ function renderEffectsUi() {
     fxBadges.innerHTML = "";
     for (const e of list) {
       let sec = 0;
-      if (typeof e.pausedRemaining === 'number') sec = Math.max(0, Math.ceil(e.pausedRemaining / 1000));
-      else if (typeof e.expiresAt === 'number') sec = Math.max(0, Math.ceil((e.expiresAt - t) / 1000));
-      const pausedMark = typeof e.pausedRemaining === 'number' ? ' ⏸' : '';
+      let label = "";
+      if (e.permanent) {
+        label = `${e.key} (PERM) ⚠️`;
+      } else {
+        if (typeof e.pausedRemaining === 'number') sec = Math.max(0, Math.ceil(e.pausedRemaining / 1000));
+        else if (typeof e.expiresAt === 'number') sec = Math.max(0, Math.ceil((e.expiresAt - t) / 1000));
+        const pausedMark = typeof e.pausedRemaining === 'number' ? ' ⏸' : '';
+        label = `${e.key} (${sec}s)${pausedMark}`;
+      }
       const div = document.createElement("div");
       div.className = "fxBadge";
-      div.textContent = `${e.key} (${sec}s)${pausedMark}`;
-      div.title = typeof e.pausedRemaining === 'number' ? 'Paused - will resume on login' : '';
+      div.textContent = label;
+      if (e.permanent) {
+        div.title = 'PERMANENT - must be cured by Healer, Enchanter, or special item!';
+        div.style.borderColor = '#ff4d6d';
+        div.style.color = '#ff8a9a';
+      } else {
+        div.title = typeof e.pausedRemaining === 'number' ? 'Paused - will resume on login' : '';
+      }
       fxBadges.appendChild(div);
     }
   }
@@ -7383,6 +7485,7 @@ function pruneExpiredEffects() {
   const expired = [];
   for (const [k, e] of Object.entries(state.effects)) {
     if (!e) continue;
+    if (e.permanent) continue; // permanent must be cured by healer/enchanter/item
     if (typeof e.pausedRemaining === 'number') continue; // don't prune paused effects
     if (typeof e.expiresAt !== "number" || e.expiresAt <= t) {
       delete state.effects[k];
@@ -7403,12 +7506,9 @@ function pruneExpiredEffects() {
 
 function tickEffects() {
   if (!state || !state.effects) return;
-  // If any paused effects exist in current state, skip ticking (paused during offline handling)
-  // But if current state is active (not paused), resume logic already applied, so we tick normally
-  // Check if effects are paused - if so, skip ticks
   let hasPaused = false;
   for (const e of Object.values(state.effects)) { if (e && typeof e.pausedRemaining === 'number') { hasPaused = true; break; } }
-  if (hasPaused) return; // paused effects don't tick
+  if (hasPaused) return;
   pruneExpiredEffects();
   const t = nowMs();
 
@@ -7420,10 +7520,8 @@ function tickEffects() {
       bleed.nextTickAt = bleed.nextTickAt + missed * 5000;
       const dealt = applyDamage(missed, { fromEffect: true }) || 0;
       playEffectSfx("bleeding", "tick");
-      appendLog(`🩸 Bleeding hurts you (-${dealt} HP).`);
-      renderStats();
-      renderLog();
-      autoSave();
+      appendLog(`🩸 Bleeding hurts you (-${dealt} HP) - use Bandage or Healer to cure.`);
+      renderStats(); renderLog(); autoSave();
     }
   }
 
@@ -7439,9 +7537,7 @@ function tickEffects() {
         state.hp = Math.min(playerMaxHp(), (state.hp || 0) + heal);
         playEffectSfx("aether", "tick");
         appendLog(`✨ Aether knits your wounds (+${heal} HP).`);
-        renderStats();
-        renderLog();
-        autoSave();
+        renderStats(); renderLog(); autoSave();
       }
     }
   }
@@ -7454,13 +7550,160 @@ function tickEffects() {
       poison.nextTickAt = poison.nextTickAt + missed * 4000;
       const dealt = applyDamage(missed * 2, { fromEffect: true }) || 0;
       playEffectSfx("poisoned", "tick");
-      appendLog(`☠️ Poison burns you (-${dealt} HP).`);
-      renderStats();
-      renderLog();
-      autoSave();
+      appendLog(`☠️ Poison burns you (-${dealt} HP) - Antidote or Healer cures.`);
+      renderStats(); renderLog(); autoSave();
+    }
+  }
+
+  // NEW: well_fed - slow HP regen + max HP buff
+  const wellFed = state.effects.well_fed;
+  if (wellFed && typeof wellFed.expiresAt === "number" && wellFed.expiresAt > t) {
+    if (typeof wellFed.nextTickAt !== "number") wellFed.nextTickAt = t + 8000;
+    if (t >= wellFed.nextTickAt) {
+      const missed = Math.min(2, Math.floor((t - wellFed.nextTickAt) / 8000) + 1);
+      wellFed.nextTickAt += missed * 8000;
+      if ((state.hp||0) < playerMaxHp()) {
+        const heal = missed * 1;
+        state.hp = Math.min(playerMaxHp(), (state.hp||0)+heal);
+        appendLog(`🍖 Well Fed restores (+${heal} HP) - you feel fortified.`);
+        renderStats(); renderLog(); autoSave();
+      }
+    }
+  }
+
+  // NEW: hydrated - mana regen
+  const hydrated = state.effects.hydrated;
+  if (hydrated && typeof hydrated.expiresAt === "number" && hydrated.expiresAt > t) {
+    if (typeof hydrated.nextTickAt !== "number") hydrated.nextTickAt = t + 8000;
+    if (t >= hydrated.nextTickAt) {
+      const missed = Math.min(2, Math.floor((t - hydrated.nextTickAt) / 8000) + 1);
+      hydrated.nextTickAt += missed * 8000;
+      if ((state.mana||0) < playerMaxMana()) {
+        const gain = missed * 1;
+        state.mana = Math.min(playerMaxMana(), (state.mana||0)+gain);
+        appendLog(`💧 Hydrated restores (+${gain} mana) - clear mind.`);
+        renderStats(); renderLog(); autoSave();
+      }
+    }
+  }
+
+  // NEW: rested - strong regen for HP and mana
+  const rested = state.effects.rested;
+  if (rested && typeof rested.expiresAt === "number" && rested.expiresAt > t) {
+    if (typeof rested.nextTickAt !== "number") rested.nextTickAt = t + 6000;
+    if (t >= rested.nextTickAt) {
+      const missed = Math.min(2, Math.floor((t - rested.nextTickAt) / 6000) + 1);
+      rested.nextTickAt += missed * 6000;
+      let did = false;
+      if ((state.hp||0) < playerMaxHp()) {
+        const heal = missed * 2;
+        state.hp = Math.min(playerMaxHp(), (state.hp||0)+heal);
+        appendLog(`😴 Rested heals (+${heal} HP).`);
+        did = true;
+      }
+      if ((state.mana||0) < playerMaxMana()) {
+        const gain = missed * 2;
+        state.mana = Math.min(playerMaxMana(), (state.mana||0)+gain);
+        if (!did) appendLog(`😴 Rested restores (+${gain} mana).`);
+        else appendLog(`😴 Rested restores (+${gain} mana).`);
+        did = true;
+      }
+      if (did) { renderStats(); renderLog(); autoSave(); }
+    }
+  }
+
+  // NEW: sunfire - mana regen + light
+  const sunfire = state.effects.sunfire;
+  if (sunfire && typeof sunfire.expiresAt === "number" && sunfire.expiresAt > t) {
+    if (typeof sunfire.nextTickAt !== "number") sunfire.nextTickAt = t + 7000;
+    if (t >= sunfire.nextTickAt) {
+      const missed = Math.min(2, Math.floor((t - sunfire.nextTickAt) / 7000) + 1);
+      sunfire.nextTickAt += missed * 7000;
+      if ((state.mana||0) < playerMaxMana()) {
+        const gain = missed * 2;
+        state.mana = Math.min(playerMaxMana(), (state.mana||0)+gain);
+        appendLog(`☀️ Sunfire surges (+${gain} mana) - arcane clarity.`);
+        renderStats(); renderLog(); autoSave();
+      }
+    }
+  }
+
+  // NEW: titanblood - damage boost already via bonus, plus occasional HP
+  const titanblood = state.effects.titanblood;
+  if (titanblood && typeof titanblood.expiresAt === "number" && titanblood.expiresAt > t) {
+    if (typeof titanblood.nextTickAt !== "number") titanblood.nextTickAt = t + 10000;
+    if (t >= titanblood.nextTickAt) {
+      titanblood.nextTickAt += 10000;
+      if ((state.hp||0) < playerMaxHp()) {
+        state.hp = Math.min(playerMaxHp(), (state.hp||0)+1);
+        appendLog(`🩸 Titanblood throbs - you feel unstoppable (+1 HP, +14% STR).`);
+        renderStats(); renderLog(); autoSave();
+      }
+    }
+  }
+
+  // NEW: cursed - occasional bad tick, mana drain, can become permanent
+  const cursed = state.effects.cursed;
+  if (cursed && (typeof cursed.expiresAt === "number" && cursed.expiresAt > t || cursed.permanent)) {
+    if (!cursed.permanent) {
+      if (typeof cursed.nextTickAt !== "number") cursed.nextTickAt = t + 12000;
+      if (t >= cursed.nextTickAt) {
+        cursed.nextTickAt += 12000;
+        if (Math.random() < 0.5 && (state.mana||0) > 0) {
+          const drain = Math.min(2, state.mana);
+          state.mana = Math.max(0, (state.mana||0)-drain);
+          appendLog(`👁️‍🗨️ Cursed drains (-${drain} mana) - seek Voidsalt, Antidote, Healer, or Enchanter to cure.`);
+          renderStats(); renderLog(); autoSave();
+        }
+        // If cursed lasts > 60s without cure, becomes permanent (needs special cure)
+        if (cursed.appliedAt && (t - cursed.appliedAt) > 60000 && Math.random() < 0.35 && !cursed.permanent) {
+          cursed.permanent = true;
+          delete cursed.expiresAt;
+          appendLog(`⚠️ Curse has taken root - it is now PERMANENT! Seek Healer (Purify 20g) or Enchanter (Curse Removal 15g) or Purification Draught.`);
+          renderStats(); renderLog(); autoSave();
+        }
+      }
+    } else {
+      // permanent cursed occasionally drains more
+      if (typeof cursed.nextTickAt !== "number") cursed.nextTickAt = t + 15000;
+      if (t >= cursed.nextTickAt) {
+        cursed.nextTickAt += 15000;
+        const drain = Math.min(3, state.mana || 0);
+        if (drain > 0) {
+          state.mana = Math.max(0, (state.mana||0)-drain);
+          appendLog(`👁️‍🗨️ PERMANENT Curse drains (-${drain} mana) - MUST be cured by Healer/Enchanter!`);
+          renderStats(); renderLog(); autoSave();
+        }
+      }
+    }
+  }
+
+  // Permanent bleeding can happen too - if bleeding > 45s becomes permanent (needs bandage + healer)
+  const bleedPerm = state.effects.bleeding;
+  if (bleedPerm && !bleedPerm.permanent && bleedPerm.appliedAt && (t - bleedPerm.appliedAt) > 45000 && Math.random() < 0.25) {
+    bleedPerm.permanent = true;
+    delete bleedPerm.expiresAt;
+    appendLog(`⚠️ Bleeding has become DEEP & PERMANENT! Bandage may not work - need Healer or Elixir!`);
+    renderStats(); renderLog(); autoSave();
+  }
+
+  // NEW: cursed can become permanent if not cured - handled in healer cure section
+
+  // SHIELDED, WYRMHIDE, IRONBARK, VOIDSALT are damage reduction - no tick needed, but show active
+
+  // HASTED, SHADOWSTEP, SMOKEVEIL, STORMSEED, MINDGLASS, TORCHLIGHT are combat buffs - their effect is in combat via escape/accuracy mods
+  // We still give them a small regen to feel alive
+  const hasted = state.effects.hasted;
+  if (hasted && typeof hasted.expiresAt === "number" && hasted.expiresAt > t) {
+    if (typeof hasted.nextTickAt !== "number") hasted.nextTickAt = t + 9000;
+    if (t >= hasted.nextTickAt) {
+      hasted.nextTickAt += 9000;
+      // small stamina message
+      if (Math.random() < 0.3) appendLog(`⚡ Hasted - you move quick (+12% cunning, +20% escape).`);
     }
   }
 }
+
 
 function badgeForDifficulty(diffKey) {
   const d = DIFFICULTY[diffKey] || DIFFICULTY.normal;
@@ -10723,7 +10966,44 @@ const STORY = {
         });
       }
 
-      for (const r of ALCHEMIST_RECIPES) {
+      // Cure services - every effect now has a cure person/item
+      out.push({
+        label: "Buy Antidote Cure (8g) - cures poisoned/cursed/bleeding",
+        next: "alchemist",
+        disabled: !met || (!isAdminProfile(s.profile) && (s.gold || 0) < 8),
+        effect: () => {
+          if (!spendGold(8)) return;
+          const had = [];
+          if (hasEffectOnState(s, "poisoned")) { clearEffect("poisoned"); had.push("poisoned"); }
+          if (hasEffectOnState(s, "cursed")) { clearEffect("cursed"); had.push("cursed"); }
+          if (hasEffectOnState(s, "bleeding") && Math.random() < 0.7) { clearEffect("bleeding"); had.push("bleeding"); }
+          if (s.effects) {
+            for (const k of ["poisoned","cursed","bleeding"]) if (s.effects[k]?.pausedRemaining) delete s.effects[k];
+          }
+          appendLog(had.length ? `Alchemist brews a bitter draught. Cured: ${had.join(", ")}.` : "Alchemist gives you a cleansing tonic.");
+        },
+      });
+      out.push({
+        label: "Buy Purification Draught (18g) - cures ALL + permanent",
+        next: "alchemist",
+        disabled: !met || (!isAdminProfile(s.profile) && (s.gold || 0) < 18),
+        effect: () => {
+          if (!spendGold(18)) return;
+          const cleared = [];
+          for (const k of ["bleeding","poisoned","cursed"]) {
+            if (hasEffectOnState(s,k) || (s.effects && s.effects[k])) { clearEffect(k); if (s.effects) delete s.effects[k]; cleared.push(k); }
+          }
+          if (s.effects) {
+            for (const k of Object.keys(s.effects)) {
+              if (s.effects[k]?.permanent) { delete s.effects[k]; cleared.push(k+"(perm)"); }
+            }
+          }
+          addEffect("rested", 8000);
+          appendLog(cleared.length ? `Purification Draught glows. Cleansed: ${cleared.join(", ")} + Rested.` : "You drink the draught - refreshed + Rested.");
+        },
+      });
+
+            for (const r of ALCHEMIST_RECIPES) {
         const reqLine = Object.entries(r.req || {}).map(([k, v]) => `${itemLabel(k)} x${v}`).join(", ") || "(none)";
         const can = met && canCraftRecipe(s, r);
         out.push({
@@ -10761,7 +11041,43 @@ const STORY = {
         });
       }
 
-      for (const r of ENCHANTER_RECIPES) {
+      // Enchanter can cure cursed - even permanent cursed needs someone
+      out.push({
+        label: "Request Curse Removal (15g) - enchanter ritual",
+        next: "enchanter",
+        disabled: !met || (!isAdminProfile(s.profile) && (s.gold || 0) < 15),
+        effect: () => {
+          if (!spendGold(15)) return;
+          const had = hasEffectOnState(s, "cursed");
+          clearEffect("cursed");
+          if (s.effects && s.effects["cursed"]) delete s.effects["cursed"];
+          if (s.effects) {
+            for (const k of Object.keys(s.effects)) {
+              if (k.toLowerCase().includes("cursed") || s.effects[k]?.permanent) {
+                if (k === "cursed" || s.effects[k]?.permanent) delete s.effects[k];
+              }
+            }
+          }
+          addEffect("voidsalt", 10000);
+          addEffect("shielded", 8000);
+          appendLog(had ? "Enchanter traces cold fire around you. Curse lifts - Void Salt + Shielded." : "Enchanter wards you - Void Salt + Shielded.");
+        },
+      });
+      out.push({
+        label: "Blessing of Clarity (12g) - cures mental + mindglass",
+        next: "enchanter",
+        disabled: !met || (!isAdminProfile(s.profile) && (s.gold || 0) < 12),
+        effect: () => {
+          if (!spendGold(12)) return;
+          const toClear = ["cursed","smokeveil","shadowstep"];
+          let cleared = [];
+          for (const k of toClear) if (hasEffectOnState(s,k) || (s.effects&&s.effects[k])) { clearEffect(k); if (s.effects) delete s.effects[k]; cleared.push(k); }
+          addEffect("mindglass", 12000);
+          appendLog(cleared.length ? `Enchanter clears your mind: ${cleared.join(", ")} + Mindglass.` : "Enchanter grants Mindglass.");
+        },
+      });
+
+            for (const r of ENCHANTER_RECIPES) {
         const reqLine = Object.entries(r.req || {}).map(([k, v]) => `${itemLabel(k)} x${v}`).join(", ") || "(none)";
         const can = met && canCraftRecipe(s, r);
         out.push({
@@ -10839,15 +11155,70 @@ const STORY = {
       }
 
       out.push({
-        label: "Cure ailments (12g)",
+        label: "Cure ailments (12g) - bleeding/poisoned/cursed",
         next: "healer",
         disabled: !met || (!isAdminProfile(s.profile) && (s.gold || 0) < 12),
         effect: () => {
           if (!spendGold(12)) return;
+          const had = [];
+          if (hasEffectOnState(s, "bleeding")) had.push("bleeding");
+          if (hasEffectOnState(s, "poisoned")) had.push("poisoned");
+          if (hasEffectOnState(s, "cursed")) had.push("cursed");
           clearEffect("bleeding");
           clearEffect("poisoned");
           clearEffect("cursed");
-          appendLog("The healer murmurs a prayer. The worst of it fades.");
+          // Also clear paused versions
+          if (s.effects) {
+            for (const k of ["bleeding","poisoned","cursed"]) {
+              if (s.effects[k] && s.effects[k].pausedRemaining) delete s.effects[k];
+            }
+          }
+          if (had.length) appendLog(`The healer murmurs a prayer. Cured: ${had.join(", ")}.`);
+          else appendLog("The healer checks you - no major ailments found.");
+        },
+      });
+      out.push({
+        label: "Purify Curse (20g) - removes permanent cursed",
+        next: "healer",
+        disabled: !met || (!isAdminProfile(s.profile) && (s.gold || 0) < 20),
+        effect: () => {
+          if (!spendGold(20)) return;
+          const hadCursed = hasEffectOnState(s, "cursed");
+          const hadOther = hasEffectOnState(s, "bleeding") || hasEffectOnState(s, "poisoned");
+          clearEffect("cursed");
+          clearEffect("bleeding");
+          clearEffect("poisoned");
+          if (s.effects) {
+            for (const k of Object.keys(s.effects)) {
+              if (k.includes("cursed") || s.effects[k]?.permanent) delete s.effects[k];
+            }
+            // clear any paused cursed
+            if (s.effects["cursed"]) delete s.effects["cursed"];
+          }
+          addEffect("shielded", 10000);
+          appendLog(hadCursed ? "The healer burns incense, chants, and the curse lifts with a cold snap. + Shielded." : "The healer performs a purification - you feel lighter. + Shielded.");
+        },
+      });
+      out.push({
+        label: "Cleanse All (25g) - removes ALL negative effects",
+        next: "healer",
+        disabled: !met || (!isAdminProfile(s.profile) && (s.gold || 0) < 25),
+        effect: () => {
+          if (!spendGold(25)) return;
+          const toClear = ["bleeding","poisoned","cursed"];
+          let cleared = [];
+          for (const k of toClear) {
+            if (hasEffectOnState(s, k) || (s.effects && s.effects[k])) { cleared.push(k); clearEffect(k); if (s.effects && s.effects[k]) delete s.effects[k]; }
+          }
+          // Clear any debuff that is negative
+          if (s.effects) {
+            for (const k of Object.keys(s.effects)) {
+              if (["bleeding","poisoned","cursed"].includes(k)) delete s.effects[k];
+            }
+          }
+          addEffect("rested", 12000);
+          addEffect("aether", 8000);
+          appendLog(cleared.length ? `The healer uses rare herbs. Cleansed: ${cleared.join(", ")} + Rested + Aether.` : "The healer cleanses you - Rested + Aether.");
         },
       });
       out.push({

@@ -133,10 +133,11 @@ function addEffect(key, durationMs) {
   const t = nowMs();
   const wasActive = !!prev && typeof prev.expiresAt === "number" && prev.expiresAt > t;
   const existing = prev || { key };
-  state.effects[key] = {
+    state.effects[key] = {
     ...existing,
     key,
     expiresAt: t + ms,
+    appliedAt: t,
   };
   if (key === "bleeding" && typeof state.effects[key].nextTickAt !== "number") {
     state.effects[key].nextTickAt = t + 5000;
@@ -226,6 +227,7 @@ function activeEffects() {
   return Object.values(state.effects)
     .filter((e) => {
       if (!e) return false;
+      if (e.permanent) return true;
       if (typeof e.pausedRemaining === 'number') return true;
       return typeof e.expiresAt === 'number' && e.expiresAt > t;
     })
@@ -242,6 +244,7 @@ function activeEffectsForState(s) {
   return Object.values(s.effects)
     .filter((e) => {
       if (!e) return false;
+      if (e.permanent) return true;
       if (typeof e.pausedRemaining === 'number') return true;
       return typeof e.expiresAt === 'number' && e.expiresAt > t;
     })
@@ -275,13 +278,25 @@ function renderEffectsUi() {
     fxBadges.innerHTML = "";
     for (const e of list) {
       let sec = 0;
-      if (typeof e.pausedRemaining === 'number') sec = Math.max(0, Math.ceil(e.pausedRemaining / 1000));
-      else if (typeof e.expiresAt === 'number') sec = Math.max(0, Math.ceil((e.expiresAt - t) / 1000));
-      const pausedMark = typeof e.pausedRemaining === 'number' ? ' ⏸' : '';
+      let label = "";
+      if (e.permanent) {
+        label = `${e.key} (PERM) ⚠️`;
+      } else {
+        if (typeof e.pausedRemaining === 'number') sec = Math.max(0, Math.ceil(e.pausedRemaining / 1000));
+        else if (typeof e.expiresAt === 'number') sec = Math.max(0, Math.ceil((e.expiresAt - t) / 1000));
+        const pausedMark = typeof e.pausedRemaining === 'number' ? ' ⏸' : '';
+        label = `${e.key} (${sec}s)${pausedMark}`;
+      }
       const div = document.createElement("div");
       div.className = "fxBadge";
-      div.textContent = `${e.key} (${sec}s)${pausedMark}`;
-      div.title = typeof e.pausedRemaining === 'number' ? 'Paused - will resume on login' : '';
+      div.textContent = label;
+      if (e.permanent) {
+        div.title = 'PERMANENT - must be cured by Healer, Enchanter, or special item!';
+        div.style.borderColor = '#ff4d6d';
+        div.style.color = '#ff8a9a';
+      } else {
+        div.title = typeof e.pausedRemaining === 'number' ? 'Paused - will resume on login' : '';
+      }
       fxBadges.appendChild(div);
     }
   }
@@ -305,6 +320,7 @@ function pruneExpiredEffects() {
   const expired = [];
   for (const [k, e] of Object.entries(state.effects)) {
     if (!e) continue;
+    if (e.permanent) continue; // permanent must be cured by healer/enchanter/item
     if (typeof e.pausedRemaining === 'number') continue; // don't prune paused effects
     if (typeof e.expiresAt !== "number" || e.expiresAt <= t) {
       delete state.effects[k];
@@ -325,12 +341,9 @@ function pruneExpiredEffects() {
 
 function tickEffects() {
   if (!state || !state.effects) return;
-  // If any paused effects exist in current state, skip ticking (paused during offline handling)
-  // But if current state is active (not paused), resume logic already applied, so we tick normally
-  // Check if effects are paused - if so, skip ticks
   let hasPaused = false;
   for (const e of Object.values(state.effects)) { if (e && typeof e.pausedRemaining === 'number') { hasPaused = true; break; } }
-  if (hasPaused) return; // paused effects don't tick
+  if (hasPaused) return;
   pruneExpiredEffects();
   const t = nowMs();
 
@@ -342,10 +355,8 @@ function tickEffects() {
       bleed.nextTickAt = bleed.nextTickAt + missed * 5000;
       const dealt = applyDamage(missed, { fromEffect: true }) || 0;
       playEffectSfx("bleeding", "tick");
-      appendLog(`🩸 Bleeding hurts you (-${dealt} HP).`);
-      renderStats();
-      renderLog();
-      autoSave();
+      appendLog(`🩸 Bleeding hurts you (-${dealt} HP) - use Bandage or Healer to cure.`);
+      renderStats(); renderLog(); autoSave();
     }
   }
 
@@ -361,9 +372,7 @@ function tickEffects() {
         state.hp = Math.min(playerMaxHp(), (state.hp || 0) + heal);
         playEffectSfx("aether", "tick");
         appendLog(`✨ Aether knits your wounds (+${heal} HP).`);
-        renderStats();
-        renderLog();
-        autoSave();
+        renderStats(); renderLog(); autoSave();
       }
     }
   }
@@ -376,13 +385,160 @@ function tickEffects() {
       poison.nextTickAt = poison.nextTickAt + missed * 4000;
       const dealt = applyDamage(missed * 2, { fromEffect: true }) || 0;
       playEffectSfx("poisoned", "tick");
-      appendLog(`☠️ Poison burns you (-${dealt} HP).`);
-      renderStats();
-      renderLog();
-      autoSave();
+      appendLog(`☠️ Poison burns you (-${dealt} HP) - Antidote or Healer cures.`);
+      renderStats(); renderLog(); autoSave();
+    }
+  }
+
+  // NEW: well_fed - slow HP regen + max HP buff
+  const wellFed = state.effects.well_fed;
+  if (wellFed && typeof wellFed.expiresAt === "number" && wellFed.expiresAt > t) {
+    if (typeof wellFed.nextTickAt !== "number") wellFed.nextTickAt = t + 8000;
+    if (t >= wellFed.nextTickAt) {
+      const missed = Math.min(2, Math.floor((t - wellFed.nextTickAt) / 8000) + 1);
+      wellFed.nextTickAt += missed * 8000;
+      if ((state.hp||0) < playerMaxHp()) {
+        const heal = missed * 1;
+        state.hp = Math.min(playerMaxHp(), (state.hp||0)+heal);
+        appendLog(`🍖 Well Fed restores (+${heal} HP) - you feel fortified.`);
+        renderStats(); renderLog(); autoSave();
+      }
+    }
+  }
+
+  // NEW: hydrated - mana regen
+  const hydrated = state.effects.hydrated;
+  if (hydrated && typeof hydrated.expiresAt === "number" && hydrated.expiresAt > t) {
+    if (typeof hydrated.nextTickAt !== "number") hydrated.nextTickAt = t + 8000;
+    if (t >= hydrated.nextTickAt) {
+      const missed = Math.min(2, Math.floor((t - hydrated.nextTickAt) / 8000) + 1);
+      hydrated.nextTickAt += missed * 8000;
+      if ((state.mana||0) < playerMaxMana()) {
+        const gain = missed * 1;
+        state.mana = Math.min(playerMaxMana(), (state.mana||0)+gain);
+        appendLog(`💧 Hydrated restores (+${gain} mana) - clear mind.`);
+        renderStats(); renderLog(); autoSave();
+      }
+    }
+  }
+
+  // NEW: rested - strong regen for HP and mana
+  const rested = state.effects.rested;
+  if (rested && typeof rested.expiresAt === "number" && rested.expiresAt > t) {
+    if (typeof rested.nextTickAt !== "number") rested.nextTickAt = t + 6000;
+    if (t >= rested.nextTickAt) {
+      const missed = Math.min(2, Math.floor((t - rested.nextTickAt) / 6000) + 1);
+      rested.nextTickAt += missed * 6000;
+      let did = false;
+      if ((state.hp||0) < playerMaxHp()) {
+        const heal = missed * 2;
+        state.hp = Math.min(playerMaxHp(), (state.hp||0)+heal);
+        appendLog(`😴 Rested heals (+${heal} HP).`);
+        did = true;
+      }
+      if ((state.mana||0) < playerMaxMana()) {
+        const gain = missed * 2;
+        state.mana = Math.min(playerMaxMana(), (state.mana||0)+gain);
+        if (!did) appendLog(`😴 Rested restores (+${gain} mana).`);
+        else appendLog(`😴 Rested restores (+${gain} mana).`);
+        did = true;
+      }
+      if (did) { renderStats(); renderLog(); autoSave(); }
+    }
+  }
+
+  // NEW: sunfire - mana regen + light
+  const sunfire = state.effects.sunfire;
+  if (sunfire && typeof sunfire.expiresAt === "number" && sunfire.expiresAt > t) {
+    if (typeof sunfire.nextTickAt !== "number") sunfire.nextTickAt = t + 7000;
+    if (t >= sunfire.nextTickAt) {
+      const missed = Math.min(2, Math.floor((t - sunfire.nextTickAt) / 7000) + 1);
+      sunfire.nextTickAt += missed * 7000;
+      if ((state.mana||0) < playerMaxMana()) {
+        const gain = missed * 2;
+        state.mana = Math.min(playerMaxMana(), (state.mana||0)+gain);
+        appendLog(`☀️ Sunfire surges (+${gain} mana) - arcane clarity.`);
+        renderStats(); renderLog(); autoSave();
+      }
+    }
+  }
+
+  // NEW: titanblood - damage boost already via bonus, plus occasional HP
+  const titanblood = state.effects.titanblood;
+  if (titanblood && typeof titanblood.expiresAt === "number" && titanblood.expiresAt > t) {
+    if (typeof titanblood.nextTickAt !== "number") titanblood.nextTickAt = t + 10000;
+    if (t >= titanblood.nextTickAt) {
+      titanblood.nextTickAt += 10000;
+      if ((state.hp||0) < playerMaxHp()) {
+        state.hp = Math.min(playerMaxHp(), (state.hp||0)+1);
+        appendLog(`🩸 Titanblood throbs - you feel unstoppable (+1 HP, +14% STR).`);
+        renderStats(); renderLog(); autoSave();
+      }
+    }
+  }
+
+  // NEW: cursed - occasional bad tick, mana drain, can become permanent
+  const cursed = state.effects.cursed;
+  if (cursed && (typeof cursed.expiresAt === "number" && cursed.expiresAt > t || cursed.permanent)) {
+    if (!cursed.permanent) {
+      if (typeof cursed.nextTickAt !== "number") cursed.nextTickAt = t + 12000;
+      if (t >= cursed.nextTickAt) {
+        cursed.nextTickAt += 12000;
+        if (Math.random() < 0.5 && (state.mana||0) > 0) {
+          const drain = Math.min(2, state.mana);
+          state.mana = Math.max(0, (state.mana||0)-drain);
+          appendLog(`👁️‍🗨️ Cursed drains (-${drain} mana) - seek Voidsalt, Antidote, Healer, or Enchanter to cure.`);
+          renderStats(); renderLog(); autoSave();
+        }
+        // If cursed lasts > 60s without cure, becomes permanent (needs special cure)
+        if (cursed.appliedAt && (t - cursed.appliedAt) > 60000 && Math.random() < 0.35 && !cursed.permanent) {
+          cursed.permanent = true;
+          delete cursed.expiresAt;
+          appendLog(`⚠️ Curse has taken root - it is now PERMANENT! Seek Healer (Purify 20g) or Enchanter (Curse Removal 15g) or Purification Draught.`);
+          renderStats(); renderLog(); autoSave();
+        }
+      }
+    } else {
+      // permanent cursed occasionally drains more
+      if (typeof cursed.nextTickAt !== "number") cursed.nextTickAt = t + 15000;
+      if (t >= cursed.nextTickAt) {
+        cursed.nextTickAt += 15000;
+        const drain = Math.min(3, state.mana || 0);
+        if (drain > 0) {
+          state.mana = Math.max(0, (state.mana||0)-drain);
+          appendLog(`👁️‍🗨️ PERMANENT Curse drains (-${drain} mana) - MUST be cured by Healer/Enchanter!`);
+          renderStats(); renderLog(); autoSave();
+        }
+      }
+    }
+  }
+
+  // Permanent bleeding can happen too - if bleeding > 45s becomes permanent (needs bandage + healer)
+  const bleedPerm = state.effects.bleeding;
+  if (bleedPerm && !bleedPerm.permanent && bleedPerm.appliedAt && (t - bleedPerm.appliedAt) > 45000 && Math.random() < 0.25) {
+    bleedPerm.permanent = true;
+    delete bleedPerm.expiresAt;
+    appendLog(`⚠️ Bleeding has become DEEP & PERMANENT! Bandage may not work - need Healer or Elixir!`);
+    renderStats(); renderLog(); autoSave();
+  }
+
+  // NEW: cursed can become permanent if not cured - handled in healer cure section
+
+  // SHIELDED, WYRMHIDE, IRONBARK, VOIDSALT are damage reduction - no tick needed, but show active
+
+  // HASTED, SHADOWSTEP, SMOKEVEIL, STORMSEED, MINDGLASS, TORCHLIGHT are combat buffs - their effect is in combat via escape/accuracy mods
+  // We still give them a small regen to feel alive
+  const hasted = state.effects.hasted;
+  if (hasted && typeof hasted.expiresAt === "number" && hasted.expiresAt > t) {
+    if (typeof hasted.nextTickAt !== "number") hasted.nextTickAt = t + 9000;
+    if (t >= hasted.nextTickAt) {
+      hasted.nextTickAt += 9000;
+      // small stamina message
+      if (Math.random() < 0.3) appendLog(`⚡ Hasted - you move quick (+12% cunning, +20% escape).`);
     }
   }
 }
+
 
 function badgeForDifficulty(diffKey) {
   const d = DIFFICULTY[diffKey] || DIFFICULTY.normal;

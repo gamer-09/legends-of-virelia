@@ -1712,21 +1712,37 @@ function effectBonusForStat(s, statKey) {
   const k = String(statKey || "").trim().toLowerCase();
   if (!k) return 0;
   let bonus = 0;
-  if (k === "strength" && hasEffectOnState(s, "titanblood")) bonus += 0.06;
-  if (k === "arcana" && hasEffectOnState(s, "sunfire")) bonus += 0.06;
-  if (k === "arcana" && hasEffectOnState(s, "mindglass")) bonus += 0.04;
-  if (k === "cunning" && hasEffectOnState(s, "shadowstep")) bonus += 0.06;
-  if (k === "cunning" && hasEffectOnState(s, "mindglass")) bonus += 0.04;
-  if (k === "cunning" && hasEffectOnState(s, "smokeveil")) bonus += 0.04;
-  if (k === "resilience" && hasEffectOnState(s, "ironbark")) bonus += 0.06;
-  if (k === "resilience" && hasEffectOnState(s, "wyrmhide")) bonus += 0.04;
-  if (k === "resilience" && hasEffectOnState(s, "voidsalt")) bonus += 0.03;
-  if (k === "cunning" && hasEffectOnState(s, "torchlight")) bonus += 0.02;
-  if (k === "cunning" && hasEffectOnState(s, "hasted")) bonus += 0.02;
-  if (k === "resilience" && hasEffectOnState(s, "hydrated")) bonus += 0.01;
-  if (k === "resilience" && hasEffectOnState(s, "well_fed")) bonus += 0.01;
-  if (hasEffectOnState(s, "rested")) bonus += 0.01;
-  return clamp(bonus, 0, 0.12);
+  // Strong impactful bonuses - each effect now does something noticeable
+  if (k === "strength" && hasEffectOnState(s, "titanblood")) bonus += 0.14; // +14% str checks, + damage
+  if (k === "strength" && hasEffectOnState(s, "rested")) bonus += 0.03;
+  if (k === "cunning" && hasEffectOnState(s, "rested")) bonus += 0.03;
+  if (k === "arcana" && hasEffectOnState(s, "rested")) bonus += 0.03;
+  if (k === "resilience" && hasEffectOnState(s, "rested")) bonus += 0.03;
+
+  if (k === "arcana" && hasEffectOnState(s, "sunfire")) bonus += 0.12;
+  if (k === "arcana" && hasEffectOnState(s, "mindglass")) bonus += 0.10;
+  if (k === "cunning" && hasEffectOnState(s, "shadowstep")) bonus += 0.14;
+  if (k === "cunning" && hasEffectOnState(s, "mindglass")) bonus += 0.08;
+  if (k === "cunning" && hasEffectOnState(s, "smokeveil")) bonus += 0.08;
+  if (k === "resilience" && hasEffectOnState(s, "ironbark")) bonus += 0.12;
+  if (k === "resilience" && hasEffectOnState(s, "wyrmhide")) bonus += 0.10;
+  if (k === "resilience" && hasEffectOnState(s, "voidsalt")) bonus += 0.08;
+  if (k === "cunning" && hasEffectOnState(s, "torchlight")) bonus += 0.08;
+  if (k === "cunning" && hasEffectOnState(s, "hasted")) bonus += 0.12;
+  if (k === "strength" && hasEffectOnState(s, "hasted")) bonus += 0.05;
+  if (k === "resilience" && hasEffectOnState(s, "hydrated")) bonus += 0.06;
+  if (k === "resilience" && hasEffectOnState(s, "well_fed")) bonus += 0.06;
+  if (k === "cunning" && hasEffectOnState(s, "stormseed")) bonus += 0.06;
+  if (k === "strength" && hasEffectOnState(s, "stormseed")) bonus += 0.08;
+  if (k === "arcana" && hasEffectOnState(s, "aether")) bonus += 0.04;
+
+  // Debuffs reduce stats
+  if (k === "strength" && hasEffectOnState(s, "bleeding")) bonus -= 0.05;
+  if (k === "resilience" && hasEffectOnState(s, "poisoned")) bonus -= 0.06;
+  if (k === "arcana" && hasEffectOnState(s, "cursed")) bonus -= 0.10;
+  if (k === "cunning" && hasEffectOnState(s, "cursed")) bonus -= 0.05;
+
+  return clamp(bonus, -0.15, 0.22);
 }
 
 function useItem(itemKey, ev, targetId) {
@@ -2037,9 +2053,16 @@ function useItem(itemKey, ev, targetId) {
   if (k === "bandage") {
     const heal = 18 + res * 2;
     state.hp = Math.min(playerMaxHp(), (state.hp || 0) + heal);
-    clearEffect("bleeding");
-    addEffect("shielded", 14000);
-    logLine(`🩹 You use a bandage (+${heal} HP).`);
+    const hadBleedPerm = !!(state.effects && state.effects["bleeding"]?.permanent);
+    if (hadBleedPerm && Math.random() < 0.5) {
+      // 50% chance bandage fails on permanent
+      logLine(`🩹 Bandage (+${heal} HP) but deep bleeding persists - need Healer or Wyrmhide/Elixir!`);
+    } else {
+      clearEffect("bleeding");
+      if (state.effects) delete state.effects["bleeding"];
+      addEffect("shielded", 14000);
+      logLine(hadBleedPerm ? `🩹 Bandage (+${heal} HP) miraculously stops PERMANENT bleeding! + Shielded.` : `🩹 You use a bandage (+${heal} HP) + Shielded.`);
+    }
   } else if (k === "health_potion") {
     const heal = 26 + res * 3;
     state.hp = Math.min(playerMaxHp(), (state.hp || 0) + heal);
@@ -2065,19 +2088,36 @@ function useItem(itemKey, ev, targetId) {
   } else if (k === "antidote") {
     const hadP = hasEffectOnState(state, "poisoned");
     const hadC = hasEffectOnState(state, "cursed");
+    const hadB = hasEffectOnState(state, "bleeding");
+    const hadAny = hadP || hadC || hadB;
     clearEffect("poisoned");
     clearEffect("cursed");
-    logLine((hadP || hadC) ? "🧴 You take an antidote. The sickness fades." : "🧴 You take an antidote." );
+    // Antidote now also helps bleeding slightly and can cure permanent if used twice
+    if (hadB && Math.random() < 0.6) clearEffect("bleeding");
+    // Clear paused versions too
+    if (state.effects) {
+      for (const kk of ["poisoned","cursed"]) if (state.effects[kk]?.pausedRemaining) delete state.effects[kk];
+    }
+    logLine(hadAny ? "🧴 You take an antidote. Ailments fade - poisoned/cursed cleared, bleeding may stop." : "🧴 You take an antidote - you feel clearer." );
   } else if (k === "elixir") {
     const heal = Math.max(12, Math.floor(18 + res * 1.6));
     const gain = Math.max(10, Math.floor(14 + arc * 1.6));
     state.hp = Math.min(playerMaxHp(), (state.hp || 0) + heal);
     state.mana = Math.min(playerMaxMana(), (state.mana || 0) + gain);
-    clearEffect("bleeding");
-    clearEffect("poisoned");
-    clearEffect("cursed");
+    // Elixir now cures ALL negative effects and can cure permanent cursed
+    const cured = [];
+    for (const deb of ["bleeding","poisoned","cursed"]) {
+      if (hasEffectOnState(state, deb) || (state.effects && state.effects[deb])) { clearEffect(deb); if (state.effects) delete state.effects[deb]; cured.push(deb); }
+    }
+    // Also clear any permanent flag
+    if (state.effects) {
+      for (const kk of Object.keys(state.effects)) {
+        if (state.effects[kk]?.permanent) { delete state.effects[kk]; cured.push(kk+"(perm)"); }
+      }
+    }
     addEffect("rested", 10000);
-    logLine(`✨ You drink an elixir (+${heal} HP, +${gain} mana).`);
+    addEffect("aether", 8000);
+    logLine(cured.length ? `✨ You drink an elixir (+${heal} HP, +${gain} mana). Cured: ${cured.join(", ")} + Rested + Aether.` : `✨ You drink an elixir (+${heal} HP, +${gain} mana) + Rested.`);
   } else if (k === "ration") {
     const heal = Math.max(2, Math.floor(4 + res * 0.4));
     state.hp = Math.min(playerMaxHp(), (state.hp || 0) + heal);
@@ -2121,11 +2161,19 @@ function useItem(itemKey, ev, targetId) {
   } else if (k === "voidsalt_ampoule") {
     addEffect("voidsalt", 14000);
     clearEffect("cursed");
-    logLine("🜂 Voidsalt numbs pain and stills fear." );
+    if (state.effects && state.effects["cursed"]?.permanent) { delete state.effects["cursed"]; logLine("🜂 Voidsalt shatters a PERMANENT curse!"); }
+    logLine("🜂 Voidsalt numbs pain and stills fear - cures cursed." );
   } else if (k === "wyrmhide_tonic") {
     addEffect("wyrmhide", 15000);
-    clearEffect("bleeding");
-    logLine("🐉 Wyrmhide toughens your skin." );
+    // Wyrmhide can cure even permanent bleeding
+    if (state.effects && state.effects["bleeding"]) {
+      const wasPerm = !!state.effects["bleeding"].permanent;
+      clearEffect("bleeding");
+      delete state.effects["bleeding"];
+      logLine(wasPerm ? "🐉 Wyrmhide heals DEEP permanent bleeding! Skin hardens." : "🐉 Wyrmhide toughens your skin - bleeding stopped.");
+    } else {
+      logLine("🐉 Wyrmhide toughens your skin.");
+    }
   } else if (k === "aether_salve") {
     const heal = Math.max(6, Math.floor(12 + res * 1.0));
     state.hp = Math.min(playerMaxHp(), (state.hp || 0) + heal);

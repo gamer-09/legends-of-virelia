@@ -1708,7 +1708,18 @@ function partyAutoAttack(ev) {
   const target = enemies[0];
 
   let boost = (ev.partyDmgBoostTurns || 0) > 0 ? (1 + (ev.partyDmgBoost || 0)) : 1;
-  if (hasEffectOnState(state, "stormseed")) boost *= 1.12;
+  // Effects now do something meaningful in combat
+  if (hasEffectOnState(state, "stormseed")) boost *= 1.18;
+  if (hasEffectOnState(state, "titanblood")) boost *= 1.22;
+  if (hasEffectOnState(state, "sunfire")) boost *= 1.14;
+  if (hasEffectOnState(state, "hasted")) boost *= 1.15;
+  if (hasEffectOnState(state, "mindglass")) boost *= 1.08;
+  if (hasEffectOnState(state, "shadowstep")) boost *= 1.10;
+  if (hasEffectOnState(state, "smokeveil")) boost *= 1.05;
+  if (hasEffectOnState(state, "aether")) boost *= 1.06;
+  if (hasEffectOnState(state, "well_fed")) boost *= 1.04;
+  if (hasEffectOnState(state, "cursed")) boost *= 0.88; // cursed weakens
+
 
   const actors = allPartyActors(state);
   for (const a of actors) {
@@ -1804,7 +1815,25 @@ function enemiesAttack(ev) {
 
     const tId = targets[Math.floor(Math.random() * targets.length)];
     const accMod = ((e.accModTurns || 0) > 0 && typeof e.accMod === "number") ? e.accMod : 0;
-    const acc = clamp((e.acc || 0.7) + accMod, 0.25, 0.95);
+    let acc = clamp((e.acc || 0.7) + accMod, 0.25, 0.95);
+    // Effects now do something - defensive buffs reduce enemy accuracy
+    if (tId === "player") {
+      if (hasEffectOnState(state, "shadowstep")) acc = clamp(acc - 0.20, 0.15, 0.95);
+      if (hasEffectOnState(state, "smokeveil")) acc = clamp(acc - 0.15, 0.15, 0.95);
+      if (hasEffectOnState(state, "shielded")) acc = clamp(acc - 0.08, 0.15, 0.95);
+      if (hasEffectOnState(state, "hasted")) acc = clamp(acc - 0.10, 0.15, 0.95);
+      if (hasEffectOnState(state, "torchlight")) acc = clamp(acc - 0.05, 0.15, 0.95);
+      if (hasEffectOnState(state, "mindglass")) acc = clamp(acc - 0.06, 0.15, 0.95);
+      if (hasEffectOnState(state, "wyrmhide")) acc = clamp(acc - 0.04, 0.15, 0.95);
+      // Ruins darkness: without torchlight effect and without torch item, enemy gets bonus, you get penalty (already logged)
+      // With torchlight, you get bonus
+      if (state && state.nodeId === "ruins" && hasEffectOnState(state, "torchlight")) {
+        acc = clamp(acc - 0.12, 0.15, 0.95); // torchlight makes you harder to hit in ruins
+      }
+    }
+    // Offensive debuffs on player make them easier to hit
+    if (hasEffectOnState(state, "cursed")) acc = clamp(acc + 0.08, 0.15, 0.98);
+    if (hasEffectOnState(state, "bleeding")) acc = clamp(acc + 0.04, 0.15, 0.98);
     const hit = Math.random() < acc;
     if (!hit) {
       pushCombatLog(ev, `❌ ${e.name} attacks ${tId === "player" ? state.profile : (findPartyMemberById(state, tId)?.name || "a companion")} and misses.`);
@@ -2009,7 +2038,17 @@ function combatPlayerAction(action) {
     if (isCrossroadsSiegeCombat(ev)) {
       pushCombatLog(ev, "❌ There is no escape — this is your town." );
     } else {
-      const extra = (ev.escapeBoostTurns || 0) > 0 ? (ev.escapeBoost || 0) : 0;
+      let extra = (ev.escapeBoostTurns || 0) > 0 ? (ev.escapeBoost || 0) : 0;
+      // Effects give escape bonuses - now they do something
+      if (hasEffectOnState(state, "hasted")) extra += 0.18;
+      if (hasEffectOnState(state, "shadowstep")) extra += 0.25;
+      if (hasEffectOnState(state, "smokeveil")) extra += 0.20;
+      if (hasEffectOnState(state, "stormseed")) extra += 0.12;
+      if (hasEffectOnState(state, "torchlight")) extra += 0.08;
+      if (hasEffectOnState(state, "mindglass")) extra += 0.06;
+      if (hasEffectOnState(state, "cursed")) extra -= 0.10; // cursed makes escape harder
+      if (hasEffectOnState(state, "bleeding")) extra -= 0.05;
+
       const chance = clamp(0.42 + playerStat("cunning") * 0.03 + extra, 0.25, 0.93);
       const ok = Math.random() < chance;
       if ((ev.escapeBoostTurns || 0) > 0) {
