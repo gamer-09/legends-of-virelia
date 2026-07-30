@@ -4565,7 +4565,44 @@ function renderAdminTools() {
   effectPermLabel.appendChild(effectPermCheck);
   effectPermLabel.appendChild(effectPermText);
 
+  const allowedPermanentEffects = ['bleeding', 'poisoned', 'cursed'];
+  function updatePermanentCheckboxState() {
+    const selEff = String(effectSel.value || "").trim().toLowerCase();
+    const canBePerm = allowedPermanentEffects.includes(selEff);
+    if (!canBePerm) {
+      if (effectPermCheck.checked) {
+        effectPermCheck.checked = false;
+      }
+      effectPermCheck.disabled = true;
+      effectPermLabel.style.opacity = "0.5";
+      effectPermCheck.title = "This effect cannot be made permanent - only " + allowedPermanentEffects.join(", ") + " can be permanent. Buffs like shielding, aether would be exploit.";
+      effectPermText.title = effectPermCheck.title;
+      effectDurInput.disabled = false;
+      effectDurInput.style.opacity = "1";
+      effectDurInput.title = "";
+    } else {
+      effectPermCheck.disabled = false;
+      effectPermLabel.style.opacity = "1";
+      effectPermCheck.title = "If checked, effect has NO timer and stays forever until cured by Healer/Enchanter/item.";
+      effectPermText.title = effectPermCheck.title;
+      // keep duration disabled if checked
+      if (effectPermCheck.checked) {
+        effectDurInput.disabled = true;
+        effectDurInput.style.opacity = "0.4";
+        effectDurInput.title = "Timer disabled - permanent effect has no duration";
+      }
+    }
+  }
+
   effectPermCheck.addEventListener("change", () => {
+    const selEff = String(effectSel.value || "").trim().toLowerCase();
+    const canBePerm = allowedPermanentEffects.includes(selEff);
+    if (effectPermCheck.checked && !canBePerm) {
+      effectPermCheck.checked = false;
+      setHomeMsg(`Cannot make ${selEff} permanent - only ${allowedPermanentEffects.join(", ")} can be permanent. Shielding, aether etc would be exploit.`);
+      updatePermanentCheckboxState();
+      return;
+    }
     if (effectPermCheck.checked) {
       effectDurInput.disabled = true;
       effectDurInput.style.opacity = "0.4";
@@ -4576,6 +4613,14 @@ function renderAdminTools() {
       effectDurInput.title = "";
     }
   });
+
+  effectSel.addEventListener("change", () => {
+    updatePermanentCheckboxState();
+  });
+
+  // initial call
+  updatePermanentCheckboxState();
+
 
   const effectRow = document.createElement("div");
   effectRow.className = "row";
@@ -4597,6 +4642,11 @@ function renderAdminTools() {
     const targetProfile = String(profileSel.value || "").trim();
     const effKey = String(effectSel.value || "").trim();
     const isPerm = effectPermCheck.checked;
+    const allowedPerm = ['bleeding', 'poisoned', 'cursed'];
+    if (isPerm && !allowedPerm.includes(effKey.toLowerCase())) {
+      setHomeMsg(`Exploit blocked: ${effKey} cannot be made permanent. Only bleeding, poisoned, cursed can be permanent.`);
+      return;
+    }
     const durSec = parseFloat(effectDurInput.value || "15");
     const durMs = Math.max(1000, Math.floor((isFinite(durSec) ? durSec : 15) * 1000));
     if (!targetProfile) { setHomeMsg("Select target"); return; }
@@ -4645,6 +4695,12 @@ function renderAdminTools() {
   btnApplyAll.title = "Stage this effect for every saved profile - only saved when you click Save Staged";
   btnApplyAll.addEventListener("click", () => {
     const effKey = String(effectSel.value || "").trim();
+    const isPermAll = effectPermCheck.checked;
+    const allowedPerm = ['bleeding', 'poisoned', 'cursed'];
+    if (isPermAll && !allowedPerm.includes(effKey.toLowerCase())) {
+      setHomeMsg(`Exploit blocked: ${effKey} cannot be made permanent for all. Only bleeding, poisoned, cursed allowed.`);
+      return;
+    }
     const durSec = parseFloat(effectDurInput.value || "15");
     const durMs = Math.max(1000, Math.floor((isFinite(durSec) ? durSec : 15) * 1000));
     const allProfiles = (typeof listSaveProfiles === 'function') ? listSaveProfiles() : [];
@@ -7396,6 +7452,8 @@ function pauseAllEffects(s) {
 function resumeAllEffects(s) {
   const target = s || state;
   if (!target || !target.effects) return 0;
+  // Anti-exploit: clean any disallowed permanent effects before resuming
+  try { sanitizePermanentEffects(target); } catch(e) {}
   const t = nowMs();
   let count = 0;
   for (const [k, e] of Object.entries(target.effects)) {
@@ -7418,6 +7476,34 @@ function resumeAllEffects(s) {
     count++;
   }
   return count;
+}
+
+function sanitizePermanentEffects(s) {
+  const allowedPerm = ['bleeding', 'poisoned', 'cursed'];
+  const target = s || state;
+  if (!target || !target.effects) return 0;
+  let fixed = 0;
+  for (const [k, e] of Object.entries(target.effects)) {
+    if (!e) continue;
+    if (e.permanent) {
+      const keyLower = String(k).toLowerCase();
+      if (!allowedPerm.includes(keyLower)) {
+        // Exploit: non-permanent effect made permanent like shielding, aether - convert to 15s timed or remove
+        console.warn(`[ANTI-EXPLOIT] Removing permanent flag from disallowed effect: ${k}`);
+        delete e.permanent;
+        delete e.isPermanentAdmin;
+        delete e.appliedAt;
+        // Convert to normal timed 15s buff instead of permanent, to prevent exploit
+        const now = (typeof nowMs === 'function' ? nowMs() : Date.now());
+        e.expiresAt = now + 15000;
+        if (k === 'bleeding') e.nextTickAt = now + 5000;
+        if (k === 'aether') e.nextTickAt = now + 4000;
+        if (k === 'poisoned') e.nextTickAt = now + 4000;
+        fixed++;
+      }
+    }
+  }
+  return fixed;
 }
 
 function hasPausedEffects(s) {
@@ -7448,6 +7534,7 @@ function activeEffects() {
 
 function activeEffectsForState(s) {
   if (!s || !s.effects) return [];
+  try { sanitizePermanentEffects(s); } catch(e) {}
   const t = nowMs();
   return Object.values(s.effects)
     .filter((e) => {
@@ -7523,6 +7610,7 @@ function renderEffectsUi() {
 
 function pruneExpiredEffects() {
   if (!state || !state.effects) return;
+  try { sanitizePermanentEffects(state); } catch(e) {}
   const t = nowMs();
   let changed = false;
   const expired = [];

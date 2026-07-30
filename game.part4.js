@@ -188,6 +188,8 @@ function pauseAllEffects(s) {
 function resumeAllEffects(s) {
   const target = s || state;
   if (!target || !target.effects) return 0;
+  // Anti-exploit: clean any disallowed permanent effects before resuming
+  try { sanitizePermanentEffects(target); } catch(e) {}
   const t = nowMs();
   let count = 0;
   for (const [k, e] of Object.entries(target.effects)) {
@@ -210,6 +212,34 @@ function resumeAllEffects(s) {
     count++;
   }
   return count;
+}
+
+function sanitizePermanentEffects(s) {
+  const allowedPerm = ['bleeding', 'poisoned', 'cursed'];
+  const target = s || state;
+  if (!target || !target.effects) return 0;
+  let fixed = 0;
+  for (const [k, e] of Object.entries(target.effects)) {
+    if (!e) continue;
+    if (e.permanent) {
+      const keyLower = String(k).toLowerCase();
+      if (!allowedPerm.includes(keyLower)) {
+        // Exploit: non-permanent effect made permanent like shielding, aether - convert to 15s timed or remove
+        console.warn(`[ANTI-EXPLOIT] Removing permanent flag from disallowed effect: ${k}`);
+        delete e.permanent;
+        delete e.isPermanentAdmin;
+        delete e.appliedAt;
+        // Convert to normal timed 15s buff instead of permanent, to prevent exploit
+        const now = (typeof nowMs === 'function' ? nowMs() : Date.now());
+        e.expiresAt = now + 15000;
+        if (k === 'bleeding') e.nextTickAt = now + 5000;
+        if (k === 'aether') e.nextTickAt = now + 4000;
+        if (k === 'poisoned') e.nextTickAt = now + 4000;
+        fixed++;
+      }
+    }
+  }
+  return fixed;
 }
 
 function hasPausedEffects(s) {
@@ -240,6 +270,7 @@ function activeEffects() {
 
 function activeEffectsForState(s) {
   if (!s || !s.effects) return [];
+  try { sanitizePermanentEffects(s); } catch(e) {}
   const t = nowMs();
   return Object.values(s.effects)
     .filter((e) => {
@@ -315,6 +346,7 @@ function renderEffectsUi() {
 
 function pruneExpiredEffects() {
   if (!state || !state.effects) return;
+  try { sanitizePermanentEffects(state); } catch(e) {}
   const t = nowMs();
   let changed = false;
   const expired = [];
