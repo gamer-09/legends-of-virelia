@@ -233,7 +233,7 @@ You hear boots above — guard shift change in 2 minutes.`;
           },
           failForward: {
             text:"Hatch cracks loud. You snatch ledger as boots thunder.",
-            effect: function(){ s.arcs.investigation.stage=3; addInvItem(s,"ledger",1); setActFlag("investigationHeat",(getActFlag("investigationHeat")||0)+1); addEffect("bleeding",20000); applyDamage(6); }
+            effect: function(){ s.arcs.investigation.stage=3; addInvItem(s,"ledger",1); setActFlag("investigationHeat",(getActFlag("investigationHeat")||0)+1); addEffect("bleeding", 12000); applyDamage(6); }
           },
           fail: { text:"Hatch holds, guard clips you.", effect:function(){ applyDamage(10); } },
           next: "act1_ledger_decision"
@@ -248,9 +248,9 @@ You hear boots above — guard shift change in 2 minutes.`;
           },
           failForward: {
             text:"Vision shows enough but leaves trace someone skilled might follow. Vael will know you scried.",
-            effect: function(){ s.arcs.investigation.stage=3; addInvItem(s,"ledger",1); setActFlag("investigationHeat",(getActFlag("investigationHeat")||0)+1); addEffect("cursed",20000); adjustNpc('vael_enchanter',1,'Scried cellar'); }
+            effect: function(){ s.arcs.investigation.stage=3; addInvItem(s,"ledger",1); setActFlag("investigationHeat",(getActFlag("investigationHeat")||0)+1); addEffect("cursed", 10000); adjustNpc('vael_enchanter',1,'Scried cellar'); }
           },
-          fail: { text:"Vision fractures and bites.", effect:function(){ addEffect("cursed",30000); applyDamage(8); } },
+          fail: { text:"Vision fractures and bites.", effect:function(){ addEffect("cursed", 12000); applyDamage(8); } },
           next: "act1_ledger_decision"
         },
         { label:"Leave (too risky)", className:"secondary", next:"crossroads" }

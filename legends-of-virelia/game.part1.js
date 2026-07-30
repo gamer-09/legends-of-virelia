@@ -2030,7 +2030,7 @@ function useItem(itemKey, ev, targetId) {
     const heal = 18 + res * 2;
     state.hp = Math.min(playerMaxHp(), (state.hp || 0) + heal);
     clearEffect("bleeding");
-    addEffect("shielded", 30000);
+    addEffect("shielded", 14000);
     logLine(`🩹 You use a bandage (+${heal} HP).`);
   } else if (k === "health_potion") {
     const heal = 26 + res * 3;
@@ -2046,7 +2046,7 @@ function useItem(itemKey, ev, targetId) {
     state.mana = Math.min(playerMaxMana(), (state.mana || 0) + gain);
     logLine(`🔹 You drink a mana tonic (+${gain} mana).`);
   } else if (k === "stamina_draught") {
-    addEffect("hasted", 25000);
+    addEffect("hasted", 12000);
     if (inCombat) {
       combatEv.escapeBoost = Math.max(combatEv.escapeBoost || 0, 0.12 + cun * 0.004);
       combatEv.escapeBoostTurns = Math.max(combatEv.escapeBoostTurns || 0, 2);
@@ -2068,18 +2068,18 @@ function useItem(itemKey, ev, targetId) {
     clearEffect("bleeding");
     clearEffect("poisoned");
     clearEffect("cursed");
-    addEffect("rested", 20000);
+    addEffect("rested", 10000);
     logLine(`✨ You drink an elixir (+${heal} HP, +${gain} mana).`);
   } else if (k === "ration") {
     const heal = Math.max(2, Math.floor(4 + res * 0.4));
     state.hp = Math.min(playerMaxHp(), (state.hp || 0) + heal);
-    addEffect("well_fed", 20000);
+    addEffect("well_fed", 10000);
     logLine(`🍞 You eat rations (+${heal} HP).`);
   } else if (k === "waterskin") {
-    addEffect("hydrated", 25000);
+    addEffect("hydrated", 12000);
     logLine("💧 You drink from the waterskin.");
   } else if (k === "torch") {
-    addEffect("torchlight", 25000);
+    addEffect("torchlight", 12000);
     logLine("🔥 You light a torch. The shadows pull back.");
   } else if (k === "smoke_bomb") {
     if (inCombat) {
@@ -2092,50 +2092,50 @@ function useItem(itemKey, ev, targetId) {
       combatEv.escapeBoostTurns = Math.max(combatEv.escapeBoostTurns || 0, 2);
       logLine("💨 Smoke blooms. Enemy aim falters." );
     } else {
-      addEffect("smokeveil", 16000);
+      addEffect("smokeveil", 8000);
       logLine("💨 Smoke clings to you, dulling footsteps." );
     }
   } else if (k === "phoenix_draught") {
     state.hp = playerMaxHp();
     clearEffect("bleeding");
-    addEffect("shielded", 45000);
-    addEffect("rested", 45000);
+    addEffect("shielded", 18000);
+    addEffect("rested", 10000);
     logLine("🔥 Phoenix Draught surges through you. Wounds refuse to linger." );
   } else if (k === "titanblood_elixir") {
     const heal = Math.max(8, Math.floor(14 + res * 1.2));
     state.hp = Math.min(playerMaxHp(), (state.hp || 0) + heal);
-    addEffect("titanblood", 35000);
+    addEffect("titanblood", 18000);
     logLine(`🩸 Titanblood hardens your will (+${heal} HP).`);
   } else if (k === "sunfire_serum") {
     state.mana = playerMaxMana();
-    addEffect("sunfire", 30000);
+    addEffect("sunfire", 14000);
     logLine("☀️ Sunfire floods your reserves. Magic feels clean." );
   } else if (k === "voidsalt_ampoule") {
-    addEffect("voidsalt", 30000);
+    addEffect("voidsalt", 14000);
     clearEffect("cursed");
     logLine("🜂 Voidsalt numbs pain and stills fear." );
   } else if (k === "wyrmhide_tonic") {
-    addEffect("wyrmhide", 35000);
+    addEffect("wyrmhide", 15000);
     clearEffect("bleeding");
     logLine("🐉 Wyrmhide toughens your skin." );
   } else if (k === "aether_salve") {
     const heal = Math.max(6, Math.floor(12 + res * 1.0));
     state.hp = Math.min(playerMaxHp(), (state.hp || 0) + heal);
-    addEffect("aether", 30000);
+    addEffect("aether", 14000);
     logLine(`✨ Aether salve stings clean (+${heal} HP).`);
   } else if (k === "stormseed_powder") {
-    addEffect("stormseed", 25000);
+    addEffect("stormseed", 12000);
     logLine("⚡ Stormseed sparks in your veins. Reflexes sharpen." );
   } else if (k === "mindglass_vial") {
-    addEffect("mindglass", 25000);
+    addEffect("mindglass", 12000);
     logLine("🔍 Mindglass clears your thoughts. The world feels slow." );
   } else if (k === "shadowstep_incense") {
-    addEffect("shadowstep", 25000);
+    addEffect("shadowstep", 12000);
     logLine("🕯️ Shadowstep incense wraps you in hush." );
   } else if (k === "ironbark_poultice") {
     const heal = Math.max(6, Math.floor(10 + res * 1.1));
     state.hp = Math.min(playerMaxHp(), (state.hp || 0) + heal);
-    addEffect("ironbark", 35000);
+    addEffect("ironbark", 15000);
     logLine(`🌿 Ironbark poultice steadies you (+${heal} HP).`);
   } else {
     logLine(`You use ${itemLabel(k)}.`);

@@ -361,10 +361,10 @@ function applyDamage(dmg, opts) {
   let amount = Math.max(0, Math.floor(dmg));
 
   const has = (k) => activeEffects().some((e) => e.key === k);
-  if (has("shielded")) amount = Math.max(1, Math.floor(amount * 0.75));
-  if (has("wyrmhide")) amount = Math.max(1, Math.floor(amount * 0.78));
-  if (has("ironbark")) amount = Math.max(1, Math.floor(amount * 0.82));
-  if (has("voidsalt")) amount = Math.max(1, Math.floor(amount * 0.88));
+  if (has("shielded")) amount = Math.max(1, Math.floor(amount * 0.55)); // BUFFED: 45% reduction
+  if (has("wyrmhide")) amount = Math.max(1, Math.floor(amount * 0.60)); // BUFFED: 40% reduction
+  if (has("ironbark")) amount = Math.max(1, Math.floor(amount * 0.68)); // BUFFED: 32% reduction
+  if (has("voidsalt")) amount = Math.max(1, Math.floor(amount * 0.75)); // BUFFED: 25% reduction
   if (has("cursed")) amount = Math.max(1, Math.floor(amount * 1.15));
 
   const eq = totalEquipmentBonuses(state);
@@ -377,7 +377,7 @@ function applyDamage(dmg, opts) {
   state.hp -= amount;
 
   if (!o.fromEffect && amount >= 8 && Math.random() < 0.35) {
-    addEffect("bleeding", 30000);
+    addEffect("bleeding", 15000);
   }
   if (state.hp <= 0) {
     state.hp = 0;
@@ -881,7 +881,7 @@ function executeCombatSkill(skillKey, ev) {
       const per = 0.70 + skillRoll01(def, "ward") * 0.10;
       const dmg = Math.max(3, Math.floor((((base + tier * 3 + pow * 6 + Math.random() * 6 + (eq.dmgFlat || 0)) * (eq.dmgMult || 1)) * rankMul) * dmgScalar * per));
       target.hp = Math.max(0, (target.hp || 0) - dmg);
-      addEffect("hasted", 18000 + tier * 1500);
+      addEffect("hasted", 9000 + tier * 800);
       ev.escapeBoost = Math.max(ev.escapeBoost || 0, clamp(0.08 + tier * 0.02 + pow * 0.05 + (rank - 1) * 0.02 + skillRoll01(def, "esc") * 0.08, 0.08, 0.40));
       ev.escapeBoostTurns = Math.max(ev.escapeBoostTurns || 0, 2);
       pushCombatLog(ev, `🌬️ ${state.profile} casts ${def.label} (-${manaCost} mana, ${target.name} -${dmg} HP). You are hastened.`);
@@ -1001,7 +1001,7 @@ function executeCombatSkill(skillKey, ev) {
       state.hp = Math.min(playerMaxHp(), (state.hp || 0) + heal);
       state.mana = Math.min(playerMaxMana(), (state.mana || 0) + mana);
       clearEffect("cursed");
-      addEffect("rested", 14000 + tier * 2200);
+      addEffect("rested", 7000 + tier * 1000);
       pushCombatLog(ev, `🌿 ${state.profile} uses ${def.label}. Second wind (+${heal} HP, +${mana} mana).`);
       return true;
     }
@@ -1069,10 +1069,10 @@ function applyDamageToPartyTarget(targetId, amount, ev) {
   let finalDmg = guarded ? Math.max(1, Math.floor(dmg * 0.55)) : dmg;
 
   if (targetId === "player") {
-    if (hasEffectOnState(state, "shielded")) finalDmg = Math.max(1, Math.floor(finalDmg * 0.75));
-    if (hasEffectOnState(state, "wyrmhide")) finalDmg = Math.max(1, Math.floor(finalDmg * 0.78));
-    if (hasEffectOnState(state, "ironbark")) finalDmg = Math.max(1, Math.floor(finalDmg * 0.82));
-    if (hasEffectOnState(state, "voidsalt")) finalDmg = Math.max(1, Math.floor(finalDmg * 0.88));
+    if (hasEffectOnState(state, "shielded")) finalDmg = Math.max(1, Math.floor(finalDmg * 0.55)); // BUFFED
+    if (hasEffectOnState(state, "wyrmhide")) finalDmg = Math.max(1, Math.floor(finalDmg * 0.60)); // BUFFED
+    if (hasEffectOnState(state, "ironbark")) finalDmg = Math.max(1, Math.floor(finalDmg * 0.68)); // BUFFED
+    if (hasEffectOnState(state, "voidsalt")) finalDmg = Math.max(1, Math.floor(finalDmg * 0.75)); // BUFFED
     if (hasEffectOnState(state, "cursed")) finalDmg = Math.max(1, Math.floor(finalDmg * 1.15));
     const eq = totalEquipmentBonuses(state);
     finalDmg = Math.max(1, Math.floor(finalDmg * (eq.damageTakenMult || 1)));
@@ -1081,7 +1081,7 @@ function applyDamageToPartyTarget(targetId, amount, ev) {
   if (finalDmg > 0) {
     playHitFx();
     if (targetId === "player" && finalDmg >= 8 && Math.random() < 0.35) {
-      addEffect("bleeding", 30000);
+      addEffect("bleeding", 15000);
     }
   }
 
@@ -1474,7 +1474,7 @@ function handleCrossroadsSiegeDefeat(ev) {
       const toClear = Object.keys(state.effects).filter(k => keep.indexOf(k) === -1);
       for (let i=0;i<toClear.length;i++) clearEffect(toClear[i]);
     }
-    addEffect("rested", 30000);
+    addEffect("rested", 15000);
   } catch(e) {}
   if (state.party && Array.isArray(state.party.members)) {
     for (const m of state.party.members) {
@@ -1775,7 +1775,7 @@ function enemiesAttack(ev) {
         total += applyDamageToPartyTarget(id, dmg, ev);
       }
       if (Math.random() < 0.45 && !hasEffectOnState(state, "cursed")) {
-        addEffect("cursed", 26000);
+        addEffect("cursed", 12000);
         pushCombatLog(ev, `🕯️ ${e.name} spreads a curse.`);
       }
       pushCombatLog(ev, `💥 ${e.name} unleashes Shadow Nova (-${total} HP across your party).`);
@@ -1817,7 +1817,7 @@ function enemiesAttack(ev) {
     const name = String(e.name || "");
     if (/\bvenom\b/i.test(name) && tId === "player" && dealt > 0) {
       if (!hasEffectOnState(state, "poisoned") && Math.random() < 0.40) {
-        addEffect("poisoned", 24000);
+        addEffect("poisoned", 12000);
         pushCombatLog(ev, "☠️ Venom seeps into your blood (Poisoned)." );
       }
     }

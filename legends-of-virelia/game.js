@@ -1692,7 +1692,7 @@ function useItem(itemKey, ev) {
     const heal = 18 + res * 2;
     state.hp = Math.min(playerMaxHp(), (state.hp || 0) + heal);
     clearEffect("bleeding");
-    addEffect("shielded", 30000);
+    addEffect("shielded", 14000);
     logLine(`🩹 You use a bandage (+${heal} HP).`);
   } else if (k === "health_potion") {
     const heal = 26 + res * 3;
@@ -1708,7 +1708,7 @@ function useItem(itemKey, ev) {
     state.mana = Math.min(playerMaxMana(), (state.mana || 0) + gain);
     logLine(`🔹 You drink a mana tonic (+${gain} mana).`);
   } else if (k === "stamina_draught") {
-    addEffect("hasted", 25000);
+    addEffect("hasted", 12000);
     if (inCombat) {
       combatEv.escapeBoost = Math.max(combatEv.escapeBoost || 0, 0.12 + cun * 0.004);
       combatEv.escapeBoostTurns = Math.max(combatEv.escapeBoostTurns || 0, 2);
@@ -1727,18 +1727,18 @@ function useItem(itemKey, ev) {
     state.mana = Math.min(playerMaxMana(), (state.mana || 0) + gain);
     clearEffect("bleeding");
     clearEffect("cursed");
-    addEffect("rested", 20000);
+    addEffect("rested", 10000);
     logLine(`✨ You drink an elixir (+${heal} HP, +${gain} mana).`);
   } else if (k === "ration") {
     const heal = Math.max(2, Math.floor(4 + res * 0.4));
     state.hp = Math.min(playerMaxHp(), (state.hp || 0) + heal);
-    addEffect("well_fed", 20000);
+    addEffect("well_fed", 10000);
     logLine(`🍞 You eat rations (+${heal} HP).`);
   } else if (k === "waterskin") {
-    addEffect("hydrated", 25000);
+    addEffect("hydrated", 12000);
     logLine("💧 You drink from the waterskin.");
   } else if (k === "torch") {
-    addEffect("torchlight", 25000);
+    addEffect("torchlight", 12000);
     logLine("🔥 You light a torch. The shadows pull back.");
   } else if (k === "smoke_bomb") {
     if (inCombat) {
@@ -1751,50 +1751,50 @@ function useItem(itemKey, ev) {
       combatEv.escapeBoostTurns = Math.max(combatEv.escapeBoostTurns || 0, 2);
       logLine("💨 Smoke blooms. Enemy aim falters." );
     } else {
-      addEffect("smokeveil", 16000);
+      addEffect("smokeveil", 8000);
       logLine("💨 Smoke clings to you, dulling footsteps." );
     }
   } else if (k === "phoenix_draught") {
     state.hp = playerMaxHp();
     clearEffect("bleeding");
-    addEffect("shielded", 45000);
-    addEffect("rested", 45000);
+    addEffect("shielded", 18000);
+    addEffect("rested", 10000);
     logLine("🔥 Phoenix Draught surges through you. Wounds refuse to linger." );
   } else if (k === "titanblood_elixir") {
     const heal = Math.max(8, Math.floor(14 + res * 1.2));
     state.hp = Math.min(playerMaxHp(), (state.hp || 0) + heal);
-    addEffect("titanblood", 35000);
+    addEffect("titanblood", 18000);
     logLine(`🩸 Titanblood hardens your will (+${heal} HP).`);
   } else if (k === "sunfire_serum") {
     state.mana = playerMaxMana();
-    addEffect("sunfire", 30000);
+    addEffect("sunfire", 14000);
     logLine("☀️ Sunfire floods your reserves. Magic feels clean." );
   } else if (k === "voidsalt_ampoule") {
-    addEffect("voidsalt", 30000);
+    addEffect("voidsalt", 14000);
     clearEffect("cursed");
     logLine("🜂 Voidsalt numbs pain and stills fear." );
   } else if (k === "wyrmhide_tonic") {
-    addEffect("wyrmhide", 35000);
+    addEffect("wyrmhide", 15000);
     clearEffect("bleeding");
     logLine("🐉 Wyrmhide toughens your skin." );
   } else if (k === "aether_salve") {
     const heal = Math.max(6, Math.floor(12 + res * 1.0));
     state.hp = Math.min(playerMaxHp(), (state.hp || 0) + heal);
-    addEffect("aether", 30000);
+    addEffect("aether", 14000);
     logLine(`✨ Aether salve stings clean (+${heal} HP).`);
   } else if (k === "stormseed_powder") {
-    addEffect("stormseed", 25000);
+    addEffect("stormseed", 12000);
     logLine("⚡ Stormseed sparks in your veins. Reflexes sharpen." );
   } else if (k === "mindglass_vial") {
-    addEffect("mindglass", 25000);
+    addEffect("mindglass", 12000);
     logLine("🔍 Mindglass clears your thoughts. The world feels slow." );
   } else if (k === "shadowstep_incense") {
-    addEffect("shadowstep", 25000);
+    addEffect("shadowstep", 12000);
     logLine("🕯️ Shadowstep incense wraps you in hush." );
   } else if (k === "ironbark_poultice") {
     const heal = Math.max(6, Math.floor(10 + res * 1.1));
     state.hp = Math.min(playerMaxHp(), (state.hp || 0) + heal);
-    addEffect("ironbark", 35000);
+    addEffect("ironbark", 15000);
     logLine(`🌿 Ironbark poultice steadies you (+${heal} HP).`);
   } else {
     logLine(`You use ${itemLabel(k)}.`);
@@ -3771,10 +3771,10 @@ function applyDamage(dmg, opts) {
   let amount = Math.max(0, Math.floor(dmg));
 
   const has = (k) => activeEffects().some((e) => e.key === k);
-  if (has("shielded")) amount = Math.max(1, Math.floor(amount * 0.75));
-  if (has("wyrmhide")) amount = Math.max(1, Math.floor(amount * 0.78));
-  if (has("ironbark")) amount = Math.max(1, Math.floor(amount * 0.82));
-  if (has("voidsalt")) amount = Math.max(1, Math.floor(amount * 0.88));
+  if (has("shielded")) amount = Math.max(1, Math.floor(amount * 0.55)); // BUFFED: 45% reduction
+  if (has("wyrmhide")) amount = Math.max(1, Math.floor(amount * 0.60)); // BUFFED: 40% reduction
+  if (has("ironbark")) amount = Math.max(1, Math.floor(amount * 0.68)); // BUFFED: 32% reduction
+  if (has("voidsalt")) amount = Math.max(1, Math.floor(amount * 0.75)); // BUFFED: 25% reduction
   if (has("cursed")) amount = Math.max(1, Math.floor(amount * 1.15));
 
   const eq = totalEquipmentBonuses(state);
@@ -3787,7 +3787,7 @@ function applyDamage(dmg, opts) {
   state.hp -= amount;
 
   if (!o.fromEffect && amount >= 8 && Math.random() < 0.35) {
-    addEffect("bleeding", 30000);
+    addEffect("bleeding", 15000);
   }
   if (state.hp <= 0) {
     state.hp = 0;
@@ -4247,7 +4247,7 @@ function executeCombatSkill(skillKey, ev) {
       const per = 0.70 + skillRoll01(def, "ward") * 0.10;
       const dmg = Math.max(3, Math.floor((((base + tier * 3 + pow * 6 + Math.random() * 6 + (eq.dmgFlat || 0)) * (eq.dmgMult || 1)) * rankMul) * dmgScalar * per));
       target.hp = Math.max(0, (target.hp || 0) - dmg);
-      addEffect("hasted", 18000 + tier * 1500);
+      addEffect("hasted", 9000 + tier * 800);
       ev.escapeBoost = Math.max(ev.escapeBoost || 0, clamp(0.08 + tier * 0.02 + pow * 0.05 + (rank - 1) * 0.02 + skillRoll01(def, "esc") * 0.08, 0.08, 0.40));
       ev.escapeBoostTurns = Math.max(ev.escapeBoostTurns || 0, 2);
       pushCombatLog(ev, `🌬️ ${state.profile} casts ${def.label} (-${manaCost} mana, ${target.name} -${dmg} HP). You are hastened.`);
@@ -4367,7 +4367,7 @@ function executeCombatSkill(skillKey, ev) {
       state.hp = Math.min(playerMaxHp(), (state.hp || 0) + heal);
       state.mana = Math.min(playerMaxMana(), (state.mana || 0) + mana);
       clearEffect("cursed");
-      addEffect("rested", 14000 + tier * 2200);
+      addEffect("rested", 7000 + tier * 1000);
       pushCombatLog(ev, `🌿 ${state.profile} uses ${def.label}. Second wind (+${heal} HP, +${mana} mana).`);
       return true;
     }
@@ -4435,10 +4435,10 @@ function applyDamageToPartyTarget(targetId, amount, ev) {
   let finalDmg = guarded ? Math.max(1, Math.floor(dmg * 0.55)) : dmg;
 
   if (targetId === "player") {
-    if (hasEffectOnState(state, "shielded")) finalDmg = Math.max(1, Math.floor(finalDmg * 0.75));
-    if (hasEffectOnState(state, "wyrmhide")) finalDmg = Math.max(1, Math.floor(finalDmg * 0.78));
-    if (hasEffectOnState(state, "ironbark")) finalDmg = Math.max(1, Math.floor(finalDmg * 0.82));
-    if (hasEffectOnState(state, "voidsalt")) finalDmg = Math.max(1, Math.floor(finalDmg * 0.88));
+    if (hasEffectOnState(state, "shielded")) finalDmg = Math.max(1, Math.floor(finalDmg * 0.55)); // BUFFED
+    if (hasEffectOnState(state, "wyrmhide")) finalDmg = Math.max(1, Math.floor(finalDmg * 0.60)); // BUFFED
+    if (hasEffectOnState(state, "ironbark")) finalDmg = Math.max(1, Math.floor(finalDmg * 0.68)); // BUFFED
+    if (hasEffectOnState(state, "voidsalt")) finalDmg = Math.max(1, Math.floor(finalDmg * 0.75)); // BUFFED
     if (hasEffectOnState(state, "cursed")) finalDmg = Math.max(1, Math.floor(finalDmg * 1.15));
     const eq = totalEquipmentBonuses(state);
     finalDmg = Math.max(1, Math.floor(finalDmg * (eq.damageTakenMult || 1)));
@@ -4447,7 +4447,7 @@ function applyDamageToPartyTarget(targetId, amount, ev) {
   if (finalDmg > 0) {
     playHitFx();
     if (targetId === "player" && finalDmg >= 8 && Math.random() < 0.35) {
-      addEffect("bleeding", 30000);
+      addEffect("bleeding", 15000);
     }
   }
 
@@ -6494,7 +6494,7 @@ function mysteryResolve(actionKey) {
       if (!consumeInvItem(state, "torch", 1)) {
         lines.push("You reach for a torch — but you have none.");
       } else {
-        addEffect("torchlight", 25000);
+        addEffect("torchlight", 12000);
         const ok = statCheckPass("cunning", 0.55, 0.03, 0.20, 0.90);
         if (ok) {
           const gold = 6 + Math.floor(Math.random() * 10);
@@ -6648,7 +6648,7 @@ function mysteryResolve(actionKey) {
       } else if (a === "torch") {
         if (!consumeInvItem(state, "torch", 1)) lines.push("No torch.");
         else {
-          addEffect("torchlight", 25000);
+          addEffect("torchlight", 12000);
           const k = pickCombatDropKey(2);
           addInvItem(state, k, 1);
           lines.push("In torchlight, the hidden mark becomes obvious.");
@@ -7993,7 +7993,7 @@ const STORY = {
             const hadLedger = (s.inventory?.ledger || 0) > 0;
             addInvItem(s, "ledger", 1);
             setFlag("investigationHeat", (getFlag("investigationHeat") || 0) + 1);
-            addEffect("bleeding", 20000);
+            addEffect("bleeding", 12000);
             applyDamage(6);
             appendLog("Key item gained: Ledger. Deliver Findings at Crossroads.");
             if (!hadLedger) openItemModal("ledger");
@@ -8035,7 +8035,7 @@ const STORY = {
             const hadLedger = (s.inventory?.ledger || 0) > 0;
             addInvItem(s, "ledger", 1);
             setFlag("investigationHeat", (getFlag("investigationHeat") || 0) + 1);
-            addEffect("cursed", 20000);
+            addEffect("cursed", 10000);
             appendLog("Key item gained: Ledger. Deliver Findings at Crossroads.");
             if (!hadLedger) openItemModal("ledger");
           },
@@ -8043,7 +8043,7 @@ const STORY = {
         fail: {
           text: "The vision fractures — and bites back.",
           effect: () => {
-            addEffect("cursed", 30000);
+            addEffect("cursed", 12000);
             applyDamage(8);
           },
         },
@@ -8688,7 +8688,7 @@ function doRest() {
   }
   state.mana = Math.min(playerMaxMana(), state.mana + 8);
   clearEffect("bleeding");
-  addEffect("rested", 30000);
+  addEffect("rested", 15000);
   appendLog("You rest. The city noise fades, and your breath steadies.");
   render();
   autoSave();

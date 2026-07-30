@@ -119,7 +119,7 @@ function renderSettingsModal() {
   const intro = document.createElement('div');
   intro.className = 'hint';
   intro.style.whiteSpace = 'pre-wrap';
-  intro.textContent = 'Switch between Text Mode (original bland mono you had) and Colorful RPG (new vibrant design). Your choice is saved.\n\nCurrent: ' + THEMES[currentTheme].label + ' — ' + THEMES[currentTheme].desc;
+  intro.textContent = 'Switch between 3 themes: Text Mode (bland mono), Colorful RPG (vibrant gradients), and Parchment (light old map). Your choice is saved.\n\nCurrent: ' + THEMES[currentTheme].label + ' — ' + THEMES[currentTheme].desc;
   settingsModalBodyEl.appendChild(intro);
 
   const grid = document.createElement('div');
@@ -374,12 +374,38 @@ function fixLogoutButton() {
   if (!btn) return;
   btn.textContent = '[ LOGOUT ]';
   btn.title = 'Logout current profile, save, return to home screen';
+  btn.style.display = 'inline-block';
+  btn.disabled = false;
+  // Remove old and add new with fresh listener, also keep backup via onclick
   const newBtn = btn.cloneNode(true);
   btn.parentNode.replaceChild(newBtn, btn);
-  newBtn.addEventListener('click', () => {
-    logoutNormalUser();
-  });
+  const finalBtn = document.getElementById('btnLogout');
+  if (finalBtn) {
+    finalBtn.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      console.log('[LOGOUT] Button clicked');
+      logoutNormalUser();
+    };
+    finalBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      logoutNormalUser();
+    });
+  }
 }
+
+// Global delegated handler for logout (backup)
+document.addEventListener('click', function(e){
+  const target = e.target;
+  if (!target) return;
+  if (target.id === 'btnLogout' || (target.closest && target.closest('#btnLogout'))) {
+    console.log('[LOGOUT] Delegated click');
+    e.preventDefault();
+    e.stopPropagation();
+    if (typeof logoutNormalUser === 'function') logoutNormalUser();
+  }
+});
 
 // Also fix admin sanity button - enhance its behavior
 function fixSanityButton() {

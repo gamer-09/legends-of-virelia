@@ -609,7 +609,7 @@ const STORY = {
             const hadLedger = (s.inventory?.ledger || 0) > 0;
             addInvItem(s, "ledger", 1);
             setFlag("investigationHeat", (getFlag("investigationHeat") || 0) + 1);
-            addEffect("bleeding", 20000);
+            addEffect("bleeding", 12000);
             applyDamage(6);
             appendLog("Key item gained: Ledger. Deliver Findings at Crossroads.");
             if (!hadLedger) openItemModal("ledger");
@@ -651,7 +651,7 @@ const STORY = {
             const hadLedger = (s.inventory?.ledger || 0) > 0;
             addInvItem(s, "ledger", 1);
             setFlag("investigationHeat", (getFlag("investigationHeat") || 0) + 1);
-            addEffect("cursed", 20000);
+            addEffect("cursed", 10000);
             appendLog("Key item gained: Ledger. Deliver Findings at Crossroads.");
             if (!hadLedger) openItemModal("ledger");
           },
@@ -659,7 +659,7 @@ const STORY = {
         fail: {
           text: "The vision fractures — and bites back.",
           effect: () => {
-            addEffect("cursed", 30000);
+            addEffect("cursed", 12000);
             applyDamage(8);
           },
         },
@@ -1146,7 +1146,7 @@ const STORY = {
               const toClear = Object.keys(state.effects).filter(k => !["rested","shielded"].includes(k));
               for (const k of toClear) clearEffect(k);
             }
-            addEffect("rested", 30000);
+            addEffect("rested", 15000);
           } catch(e) {}
           appendLog("A priest takes a donation and leaves you with water. The ailments of your fall fade.");
           // Also heal companions partially so they don't stay dead with effects?
@@ -1891,7 +1891,7 @@ function doRest() {
   state.mana = Math.min(playerMaxMana(), state.mana + 8);
   clearEffect("bleeding");
   clearEffect("poisoned");
-  addEffect("rested", 30000);
+  addEffect("rested", 15000);
   appendLog("You rest. The city noise fades, and your breath steadies.");
   render();
   autoSave();

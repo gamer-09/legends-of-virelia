@@ -1441,7 +1441,7 @@ function mysteryResolve(actionKey) {
       if (!consumeInvItem(state, "torch", 1)) {
         lines.push("You reach for a torch — but you have none.");
       } else {
-        addEffect("torchlight", 25000);
+        addEffect("torchlight", 12000);
         const ok = statCheckPass("cunning", 0.55, 0.03, 0.20, 0.90);
         if (ok) {
           const gold = 6 + Math.floor(Math.random() * 10);
@@ -1595,7 +1595,7 @@ function mysteryResolve(actionKey) {
       } else if (a === "torch") {
         if (!consumeInvItem(state, "torch", 1)) lines.push("No torch.");
         else {
-          addEffect("torchlight", 25000);
+          addEffect("torchlight", 12000);
           const k = pickCombatDropKey(2);
           addInvItem(state, k, 1);
           lines.push("In torchlight, the hidden mark becomes obvious.");
@@ -1739,7 +1739,7 @@ function roamAct(s, kind) {
     s.hp = Math.min(s.maxHp || 1, (s.hp || 0) + 2);
     s.mana = Math.min(typeof playerMaxMana === 'function' ? playerMaxMana() : (s.maxMana||0), (s.mana||0)+1);
     appendLog("You slow your breathing and let the noise pass. (+2 HP, +1 mana)");
-    if (typeof addEffect === 'function') addEffect("rested", 30000);
+    if (typeof addEffect === 'function') addEffect("rested", 15000);
     if (typeof autoSave === 'function') autoSave();
     if (typeof render === 'function') render();
     return;
@@ -1887,7 +1887,7 @@ function destinationAct(s, def, kind) {
     s.hp = Math.min(s.maxHp || 1, (s.hp || 0) + 2);
     s.mana = Math.min(typeof playerMaxMana === 'function' ? playerMaxMana() : (s.maxMana||0), (s.mana||0)+1);
     appendLog("You take a breath and let the crowd swallow your presence. (+2 HP, +1 mana)");
-    if (typeof addEffect === 'function') addEffect("rested", 30000);
+    if (typeof addEffect === 'function') addEffect("rested", 15000);
     if (typeof autoSave === 'function') autoSave();
     if (typeof render === 'function') render();
     return;
