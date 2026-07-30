@@ -1025,17 +1025,19 @@ const STORY = {
         disabled: !met || (!isAdminProfile(s.profile) && (s.gold || 0) < 18),
         effect: () => {
           if (!spendGold(18)) return;
+          const toClear = ["bleeding","poisoned","cursed","weak","dazed","drained","brittle","frostbitten","scorched","entangled","fear","withered","hollowed","branded","shadowbound","soulfractured","rusted"];
           const cleared = [];
-          for (const k of ["bleeding","poisoned","cursed"]) {
+          for (const k of toClear) {
             if (hasEffectOnState(s,k) || (s.effects && s.effects[k])) { clearEffect(k); if (s.effects) delete s.effects[k]; cleared.push(k); }
           }
           if (s.effects) {
             for (const k of Object.keys(s.effects)) {
-              if (s.effects[k]?.permanent) { delete s.effects[k]; cleared.push(k+"(perm)"); }
+              if (s.effects[k]?.permanent) { delete s.effects[k]; if (!cleared.includes(k)) cleared.push(k+"(perm)"); }
             }
           }
           addEffect("rested", 8000);
-          appendLog(cleared.length ? `Purification Draught glows. Cleansed: ${cleared.join(", ")} + Rested.` : "You drink the draught - refreshed + Rested.");
+          addEffect("aether", 5000);
+          appendLog(cleared.length ? `Purification Draught glows. Cleansed: ${cleared.join(", ")} + Rested + Aether.` : "You drink the draught - refreshed + Rested + Aether.");
         },
       });
 
@@ -1241,7 +1243,7 @@ const STORY = {
         disabled: !met || (!isAdminProfile(s.profile) && (s.gold || 0) < 25),
         effect: () => {
           if (!spendGold(25)) return;
-          const toClear = ["bleeding","poisoned","cursed","weak","dazed","drained","brittle","frostbitten","scorched","entangled","fear"];
+          const toClear = ["bleeding","poisoned","cursed","weak","dazed","drained","brittle","frostbitten","scorched","entangled","fear","withered","hollowed","branded","shadowbound","soulfractured","rusted"];
           let cleared = [];
           for (const k of toClear) {
             if (hasEffectOnState(s, k) || (s.effects && s.effects[k])) { cleared.push(k); clearEffect(k); if (s.effects && s.effects[k]) delete s.effects[k]; }
@@ -1276,6 +1278,34 @@ const STORY = {
           addEffect("torchlight", 10000);
           addEffect("rested", 6000);
           appendLog(cleared.length ? `Healer wraps you in warm blankets and chants. Cured: ${cleared.join(", ")} + Torchlight.` : "Healer grants Torchlight and warmth.");
+        },
+      });
+      out.push({
+        label: "Soul Restoration (30g) - cures withered/hollowed/shadowbound/soulfractured/branded/rusted + permanent",
+        next: "healer",
+        disabled: !met || (!isAdminProfile(s.profile) && (s.gold || 0) < 30),
+        effect: () => {
+          if (!spendGold(30)) return;
+          const toClear = ["withered","hollowed","branded","shadowbound","soulfractured","rusted","weak","brittle"];
+          let cleared = [];
+          for (const k of toClear) {
+            if (hasEffectOnState(s,k) || (s.effects && s.effects[k])) { clearEffect(k); if (s.effects) delete s.effects[k]; cleared.push(k); }
+          }
+          // Also clear any permanent flag
+          if (s.effects) {
+            for (const k of Object.keys(s.effects)) {
+              if (toClear.includes(k) || s.effects[k]?.permanent) {
+                if (toClear.includes(k) || ["withered","hollowed","branded","shadowbound","soulfractured","rusted"].includes(k)) {
+                  delete s.effects[k];
+                  if (!cleared.includes(k)) cleared.push(k);
+                }
+              }
+            }
+          }
+          addEffect("aether", 10000);
+          addEffect("rested", 12000);
+          addEffect("shielded", 8000);
+          appendLog(cleared.length ? `Healer performs soul restoration. Cured permanent: ${cleared.join(", ")} + Aether/Rested/Shielded.` : "Healer grants Aether/Rested/Shielded.");
         },
       });
       out.push({

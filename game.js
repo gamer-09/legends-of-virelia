@@ -1758,7 +1758,38 @@ function effectBonusForStat(s, statKey) {
   if (k === "resilience" && hasEffectOnState(s, "fear")) bonus -= 0.06;
   if (k === "arcana" && hasEffectOnState(s, "fear")) bonus -= 0.06;
 
-  return clamp(bonus, -0.35, 0.25);
+  // New permanent debuffs - stronger penalties, no timer, stays until cured by specific person/item
+  if (hasEffectOnState(s, "withered")) {
+    if (k === "strength") bonus -= 0.15;
+    if (k === "resilience") bonus -= 0.10;
+    if (k === "cunning") bonus -= 0.05;
+  }
+  if (hasEffectOnState(s, "hollowed")) {
+    if (k === "arcana") bonus -= 0.14;
+    if (k === "cunning") bonus -= 0.10;
+    if (k === "resilience") bonus -= 0.04;
+  }
+  if (hasEffectOnState(s, "branded")) {
+    if (k === "cunning") bonus -= 0.08;
+    if (k === "resilience") bonus -= 0.08;
+    if (k === "strength") bonus -= 0.04;
+  }
+  if (hasEffectOnState(s, "shadowbound")) {
+    if (k === "arcana") bonus -= 0.12;
+    if (k === "cunning") bonus -= 0.08;
+    if (k === "resilience") bonus -= 0.06;
+  }
+  if (hasEffectOnState(s, "soulfractured")) {
+    if (k === "arcana") bonus -= 0.10;
+    if (k === "resilience") bonus -= 0.12;
+    if (k === "strength") bonus -= 0.06;
+  }
+  if (hasEffectOnState(s, "rusted")) {
+    if (k === "resilience") bonus -= 0.14;
+    if (k === "strength") bonus -= 0.06;
+  }
+
+  return clamp(bonus, -0.55, 0.30);
 }
 
 function useItem(itemKey, ev, targetId) {
@@ -4585,7 +4616,13 @@ function renderAdminTools() {
     "frostbitten",
     "scorched",
     "entangled",
-    "fear"
+    "fear",
+    "withered",
+    "hollowed",
+    "branded",
+    "shadowbound",
+    "soulfractured",
+    "rusted"
   ];
   const uniqueEffectKeys = [...new Set(effectKeys)].sort();
   const effectSel = document.createElement("select");
@@ -4621,7 +4658,7 @@ function renderAdminTools() {
   effectPermLabel.appendChild(effectPermCheck);
   effectPermLabel.appendChild(effectPermText);
 
-  const allowedPermanentEffects = ['bleeding', 'poisoned', 'cursed', 'weak', 'dazed', 'drained', 'brittle', 'frostbitten', 'scorched', 'entangled', 'fear'];
+  const allowedPermanentEffects = ['bleeding', 'poisoned', 'cursed', 'weak', 'dazed', 'drained', 'brittle', 'frostbitten', 'scorched', 'entangled', 'fear', 'withered', 'hollowed', 'branded', 'shadowbound', 'soulfractured', 'rusted'];
   function updatePermanentCheckboxState() {
     const selEff = String(effectSel.value || "").trim().toLowerCase();
     const canBePerm = allowedPermanentEffects.includes(selEff);
@@ -4698,7 +4735,7 @@ function renderAdminTools() {
     const targetProfile = String(profileSel.value || "").trim();
     const effKey = String(effectSel.value || "").trim();
     const isPerm = effectPermCheck.checked;
-    const allowedPerm = ['bleeding', 'poisoned', 'cursed', 'weak', 'dazed', 'drained', 'brittle', 'frostbitten', 'scorched', 'entangled', 'fear'];
+    const allowedPerm = ['bleeding', 'poisoned', 'cursed', 'weak', 'dazed', 'drained', 'brittle', 'frostbitten', 'scorched', 'entangled', 'fear', 'withered', 'hollowed', 'branded', 'shadowbound', 'soulfractured', 'rusted'];
     if (isPerm && !allowedPerm.includes(effKey.toLowerCase())) {
       setHomeMsg(`Exploit blocked: ${effKey} cannot be made permanent. Only bleeding, poisoned, cursed can be permanent.`);
       return;
@@ -4752,7 +4789,7 @@ function renderAdminTools() {
   btnApplyAll.addEventListener("click", () => {
     const effKey = String(effectSel.value || "").trim();
     const isPermAll = effectPermCheck.checked;
-    const allowedPerm = ['bleeding', 'poisoned', 'cursed', 'weak', 'dazed', 'drained', 'brittle', 'frostbitten', 'scorched', 'entangled', 'fear'];
+    const allowedPerm = ['bleeding', 'poisoned', 'cursed', 'weak', 'dazed', 'drained', 'brittle', 'frostbitten', 'scorched', 'entangled', 'fear', 'withered', 'hollowed', 'branded', 'shadowbound', 'soulfractured', 'rusted'];
     if (isPermAll && !allowedPerm.includes(effKey.toLowerCase())) {
       setHomeMsg(`Exploit blocked: ${effKey} cannot be made permanent for all. Only bleeding, poisoned, cursed allowed.`);
       return;
@@ -7549,7 +7586,7 @@ function resumeAllEffects(s) {
 }
 
 function sanitizePermanentEffects(s) {
-  const allowedPerm = ['bleeding', 'poisoned', 'cursed', 'weak', 'dazed', 'drained', 'brittle', 'frostbitten', 'scorched', 'entangled', 'fear'];
+  const allowedPerm = ['bleeding', 'poisoned', 'cursed', 'weak', 'dazed', 'drained', 'brittle', 'frostbitten', 'scorched', 'entangled', 'fear', 'withered', 'hollowed', 'branded', 'shadowbound', 'soulfractured', 'rusted'];
   const target = s || state;
   if (!target || !target.effects) return 0;
   let fixed = 0;
@@ -7623,7 +7660,7 @@ function activeEffectsForState(s) {
 let lastEffectsSig = "";
 function renderEffectsUi() {
   if (!state) {
-    const allFxKeys = ["bleeding","poisoned","cursed","rested","shielded","aether","hasted","well_fed","hydrated","torchlight","titanblood","sunfire","voidsalt","wyrmhide","ironbark","smokeveil","shadowstep","mindglass","stormseed","weak","dazed","drained","brittle","frostbitten","scorched","entangled","fear","hit"];
+    const allFxKeys = ['bleeding', 'poisoned', 'cursed', 'rested', 'shielded', 'aether', 'hasted', 'well_fed', 'hydrated', 'torchlight', 'titanblood', 'sunfire', 'voidsalt', 'wyrmhide', 'ironbark', 'smokeveil', 'shadowstep', 'mindglass', 'stormseed', 'weak', 'dazed', 'drained', 'brittle', 'frostbitten', 'scorched', 'entangled', 'fear', 'withered', 'hollowed', 'branded', 'shadowbound', 'soulfractured', 'rusted', 'hit'];
     for (const fk of allFxKeys) document.body.classList.remove("fx-" + fk);
     if (fxBadges) fxBadges.innerHTML = "";
     return;
@@ -7635,7 +7672,7 @@ function renderEffectsUi() {
 
   const has = (k) => list.some((e) => e.key === k);
   // All effects now have visual FX
-  const allFxKeys = ["bleeding","poisoned","cursed","rested","shielded","aether","hasted","well_fed","hydrated","torchlight","titanblood","sunfire","voidsalt","wyrmhide","ironbark","smokeveil","shadowstep","mindglass","stormseed","weak","dazed","drained","brittle","frostbitten","scorched","entangled","fear","hit"];
+  const allFxKeys = ['bleeding', 'poisoned', 'cursed', 'rested', 'shielded', 'aether', 'hasted', 'well_fed', 'hydrated', 'torchlight', 'titanblood', 'sunfire', 'voidsalt', 'wyrmhide', 'ironbark', 'smokeveil', 'shadowstep', 'mindglass', 'stormseed', 'weak', 'dazed', 'drained', 'brittle', 'frostbitten', 'scorched', 'entangled', 'fear', 'withered', 'hollowed', 'branded', 'shadowbound', 'soulfractured', 'rusted', 'hit'];
   for (const fk of allFxKeys) {
     document.body.classList.toggle("fx-" + fk, has(fk));
   }
@@ -8000,6 +8037,77 @@ function tickEffects() {
         appendLog(`😱 Fear gnaws (-${drain} mana) - Torchlight, Rested, or Healer cures.`);
         renderStats(); renderLog(); autoSave();
       }
+    }
+  }
+
+  // New permanent debuffs - all have no timer, stay until cured by specific person/item
+  const withered = state.effects.withered;
+  if (withered && withered.permanent) {
+    if (typeof withered.nextTickAt !== "number") withered.nextTickAt = t + 20000;
+    if (t >= withered.nextTickAt) {
+      withered.nextTickAt += 20000;
+      const dealt = applyDamage(1, { fromEffect: true }) || 0;
+      appendLog(`🥀 Withered withers (-${dealt} HP) - Max HP reduced 10%. Need Aether + Healer + Alchemist Purification + rare herb.`);
+      renderStats(); renderLog(); autoSave();
+    }
+  }
+
+  const hollowed = state.effects.hollowed;
+  if (hollowed && hollowed.permanent) {
+    if (typeof hollowed.nextTickAt !== "number") hollowed.nextTickAt = t + 18000;
+    if (t >= hollowed.nextTickAt) {
+      hollowed.nextTickAt += 18000;
+      if (Math.random() < 0.5 && (state.mana||0) > 0) {
+        const drain = Math.min(2, state.mana);
+        state.mana = Math.max(0, (state.mana||0)-drain);
+        appendLog(`👻 Hollowed whispers (-${drain} mana) - Need Lys burn doll + Healer + Enchanter Blessing.`);
+        renderStats(); renderLog(); autoSave();
+      }
+    }
+  }
+
+  const branded = state.effects.branded;
+  if (branded && branded.permanent) {
+    if (typeof branded.nextTickAt !== "number") branded.nextTickAt = t + 25000;
+    if (t >= branded.nextTickAt) {
+      branded.nextTickAt += 25000;
+      appendLog(`🔖 Branded - Crown watches. -8% cunning/resilience. Need Healer Purify + pay 30g at Market + Crown contact.`);
+    }
+  }
+
+  const shadowbound = state.effects.shadowbound;
+  if (shadowbound && shadowbound.permanent) {
+    if (typeof shadowbound.nextTickAt !== "number") shadowbound.nextTickAt = t + 16000;
+    if (t >= shadowbound.nextTickAt) {
+      shadowbound.nextTickAt += 16000;
+      if (Math.random() < 0.4 && !hasEffectOnState(state, "cursed")) {
+        addEffect("cursed", 12000);
+        appendLog(`🌑 Shadowbound pulls - Cursed! Need Torchlight + Sunfire + Healer + Enchanter ritual.`);
+        renderStats(); renderLog(); autoSave();
+      }
+    }
+  }
+
+  const soulfractured = state.effects.soulfractured;
+  if (soulfractured && soulfractured.permanent) {
+    if (typeof soulfractured.nextTickAt !== "number") soulfractured.nextTickAt = t + 20000;
+    if (t >= soulfractured.nextTickAt) {
+      soulfractured.nextTickAt += 20000;
+      if ((state.mana||0) > 0) {
+        const drain = Math.min(2, state.mana);
+        state.mana = Math.max(0, (state.mana||0)-drain);
+        appendLog(`💔 Soulfractured - soul cracked (-${drain} mana, -12% res). Need Aether + Rested + Healer Cleanse + Enchanter.`);
+        renderStats(); renderLog(); autoSave();
+      }
+    }
+  }
+
+  const rusted = state.effects.rusted;
+  if (rusted && rusted.permanent) {
+    if (typeof rusted.nextTickAt !== "number") rusted.nextTickAt = t + 22000;
+    if (t >= rusted.nextTickAt) {
+      rusted.nextTickAt += 22000;
+      appendLog(`🔩 Rusted - armor degraded (-14% resilience). Need Blacksmith + oil + Healer.`);
     }
   }
 }
@@ -11289,17 +11397,19 @@ const STORY = {
         disabled: !met || (!isAdminProfile(s.profile) && (s.gold || 0) < 18),
         effect: () => {
           if (!spendGold(18)) return;
+          const toClear = ["bleeding","poisoned","cursed","weak","dazed","drained","brittle","frostbitten","scorched","entangled","fear","withered","hollowed","branded","shadowbound","soulfractured","rusted"];
           const cleared = [];
-          for (const k of ["bleeding","poisoned","cursed"]) {
+          for (const k of toClear) {
             if (hasEffectOnState(s,k) || (s.effects && s.effects[k])) { clearEffect(k); if (s.effects) delete s.effects[k]; cleared.push(k); }
           }
           if (s.effects) {
             for (const k of Object.keys(s.effects)) {
-              if (s.effects[k]?.permanent) { delete s.effects[k]; cleared.push(k+"(perm)"); }
+              if (s.effects[k]?.permanent) { delete s.effects[k]; if (!cleared.includes(k)) cleared.push(k+"(perm)"); }
             }
           }
           addEffect("rested", 8000);
-          appendLog(cleared.length ? `Purification Draught glows. Cleansed: ${cleared.join(", ")} + Rested.` : "You drink the draught - refreshed + Rested.");
+          addEffect("aether", 5000);
+          appendLog(cleared.length ? `Purification Draught glows. Cleansed: ${cleared.join(", ")} + Rested + Aether.` : "You drink the draught - refreshed + Rested + Aether.");
         },
       });
 
@@ -11505,7 +11615,7 @@ const STORY = {
         disabled: !met || (!isAdminProfile(s.profile) && (s.gold || 0) < 25),
         effect: () => {
           if (!spendGold(25)) return;
-          const toClear = ["bleeding","poisoned","cursed","weak","dazed","drained","brittle","frostbitten","scorched","entangled","fear"];
+          const toClear = ["bleeding","poisoned","cursed","weak","dazed","drained","brittle","frostbitten","scorched","entangled","fear","withered","hollowed","branded","shadowbound","soulfractured","rusted"];
           let cleared = [];
           for (const k of toClear) {
             if (hasEffectOnState(s, k) || (s.effects && s.effects[k])) { cleared.push(k); clearEffect(k); if (s.effects && s.effects[k]) delete s.effects[k]; }
@@ -11540,6 +11650,34 @@ const STORY = {
           addEffect("torchlight", 10000);
           addEffect("rested", 6000);
           appendLog(cleared.length ? `Healer wraps you in warm blankets and chants. Cured: ${cleared.join(", ")} + Torchlight.` : "Healer grants Torchlight and warmth.");
+        },
+      });
+      out.push({
+        label: "Soul Restoration (30g) - cures withered/hollowed/shadowbound/soulfractured/branded/rusted + permanent",
+        next: "healer",
+        disabled: !met || (!isAdminProfile(s.profile) && (s.gold || 0) < 30),
+        effect: () => {
+          if (!spendGold(30)) return;
+          const toClear = ["withered","hollowed","branded","shadowbound","soulfractured","rusted","weak","brittle"];
+          let cleared = [];
+          for (const k of toClear) {
+            if (hasEffectOnState(s,k) || (s.effects && s.effects[k])) { clearEffect(k); if (s.effects) delete s.effects[k]; cleared.push(k); }
+          }
+          // Also clear any permanent flag
+          if (s.effects) {
+            for (const k of Object.keys(s.effects)) {
+              if (toClear.includes(k) || s.effects[k]?.permanent) {
+                if (toClear.includes(k) || ["withered","hollowed","branded","shadowbound","soulfractured","rusted"].includes(k)) {
+                  delete s.effects[k];
+                  if (!cleared.includes(k)) cleared.push(k);
+                }
+              }
+            }
+          }
+          addEffect("aether", 10000);
+          addEffect("rested", 12000);
+          addEffect("shielded", 8000);
+          appendLog(cleared.length ? `Healer performs soul restoration. Cured permanent: ${cleared.join(", ")} + Aether/Rested/Shielded.` : "Healer grants Aether/Rested/Shielded.");
         },
       });
       out.push({
@@ -13594,6 +13732,55 @@ function maybeApplyDebuffFromSituation(s, situation) {
   } else if (situation === "failed_strength") {
     if (roll < 0.25) { addEffect("weak", 12000); }
     if (Math.random() < 0.20) { addEffect("brittle", 12000); }
+  } else if (situation === "withered") {
+    // Withered: permanent, from marsh/wilds long, poisoned long, bad mushroom
+    if (roll < 0.5) {
+      if (typeof addEffect === 'function') {
+        // 30% chance to be permanent directly for withered
+        if (Math.random() < 0.3) {
+          state.effects = state.effects || {};
+          state.effects["withered"] = { key: "withered", permanent: true, appliedAt: Date.now(), isPermanentAdmin: false };
+          appendLog("🥀 You feel withered - PERMANENT! Max HP -10% & strength -15%. Need Aether + Healer Soul Restoration 30g + Purification Draught.");
+        } else {
+          addEffect("withered", 12000);
+          appendLog("🥀 Withering starts - withered! Seek cure before permanent.");
+        }
+      }
+    }
+  } else if (situation === "hollowed") {
+    if (roll < 0.5) {
+      if (Math.random() < 0.35) {
+        state.effects = state.effects || {};
+        state.effects["hollowed"] = { key: "hollowed", permanent: true, appliedAt: Date.now() };
+        appendLog("👻 Hollowed - PERMANENT! -14% arcana & whispers. Need Lys burn doll + Healer + Enchanter Blessing.");
+      } else {
+        addEffect("hollowed", 15000);
+      }
+    }
+  } else if (situation === "branded") {
+    if (roll < 0.5) {
+      state.effects = state.effects || {};
+      state.effects["branded"] = { key: "branded", permanent: true, appliedAt: Date.now() };
+      appendLog("🔖 Branded by Crown/Guild - PERMANENT! Need Healer Purify 20g + pay 30g at Market + Crown contact to cure.");
+    }
+  } else if (situation === "shadowbound") {
+    if (roll < 0.45) {
+      state.effects = state.effects || {};
+      state.effects["shadowbound"] = { key: "shadowbound", permanent: true, appliedAt: Date.now() };
+      appendLog("🌑 Shadowbound - PERMANENT! Shadows cling, -12% arcana. Need Torchlight + Sunfire + Healer + Enchanter ritual.");
+    }
+  } else if (situation === "soulfractured") {
+    if (roll < 0.4) {
+      state.effects = state.effects || {};
+      state.effects["soulfractured"] = { key: "soulfractured", permanent: true, appliedAt: Date.now() };
+      appendLog("💔 Soulfractured - PERMANENT! Soul cracked -12% res & arcana. Need Aether + Rested + Healer Soul Restoration + Enchanter.");
+    }
+  } else if (situation === "rusted") {
+    if (roll < 0.4) {
+      state.effects = state.effects || {};
+      state.effects["rusted"] = { key: "rusted", permanent: true, appliedAt: Date.now() };
+      appendLog("🔩 Rusted - PERMANENT! Armor degraded -14% res. Need Blacksmith + oil + Healer Soul Restoration.");
+    }
   }
 }
 

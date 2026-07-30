@@ -451,6 +451,55 @@ function maybeApplyDebuffFromSituation(s, situation) {
   } else if (situation === "failed_strength") {
     if (roll < 0.25) { addEffect("weak", 12000); }
     if (Math.random() < 0.20) { addEffect("brittle", 12000); }
+  } else if (situation === "withered") {
+    // Withered: permanent, from marsh/wilds long, poisoned long, bad mushroom
+    if (roll < 0.5) {
+      if (typeof addEffect === 'function') {
+        // 30% chance to be permanent directly for withered
+        if (Math.random() < 0.3) {
+          state.effects = state.effects || {};
+          state.effects["withered"] = { key: "withered", permanent: true, appliedAt: Date.now(), isPermanentAdmin: false };
+          appendLog("🥀 You feel withered - PERMANENT! Max HP -10% & strength -15%. Need Aether + Healer Soul Restoration 30g + Purification Draught.");
+        } else {
+          addEffect("withered", 12000);
+          appendLog("🥀 Withering starts - withered! Seek cure before permanent.");
+        }
+      }
+    }
+  } else if (situation === "hollowed") {
+    if (roll < 0.5) {
+      if (Math.random() < 0.35) {
+        state.effects = state.effects || {};
+        state.effects["hollowed"] = { key: "hollowed", permanent: true, appliedAt: Date.now() };
+        appendLog("👻 Hollowed - PERMANENT! -14% arcana & whispers. Need Lys burn doll + Healer + Enchanter Blessing.");
+      } else {
+        addEffect("hollowed", 15000);
+      }
+    }
+  } else if (situation === "branded") {
+    if (roll < 0.5) {
+      state.effects = state.effects || {};
+      state.effects["branded"] = { key: "branded", permanent: true, appliedAt: Date.now() };
+      appendLog("🔖 Branded by Crown/Guild - PERMANENT! Need Healer Purify 20g + pay 30g at Market + Crown contact to cure.");
+    }
+  } else if (situation === "shadowbound") {
+    if (roll < 0.45) {
+      state.effects = state.effects || {};
+      state.effects["shadowbound"] = { key: "shadowbound", permanent: true, appliedAt: Date.now() };
+      appendLog("🌑 Shadowbound - PERMANENT! Shadows cling, -12% arcana. Need Torchlight + Sunfire + Healer + Enchanter ritual.");
+    }
+  } else if (situation === "soulfractured") {
+    if (roll < 0.4) {
+      state.effects = state.effects || {};
+      state.effects["soulfractured"] = { key: "soulfractured", permanent: true, appliedAt: Date.now() };
+      appendLog("💔 Soulfractured - PERMANENT! Soul cracked -12% res & arcana. Need Aether + Rested + Healer Soul Restoration + Enchanter.");
+    }
+  } else if (situation === "rusted") {
+    if (roll < 0.4) {
+      state.effects = state.effects || {};
+      state.effects["rusted"] = { key: "rusted", permanent: true, appliedAt: Date.now() };
+      appendLog("🔩 Rusted - PERMANENT! Armor degraded -14% res. Need Blacksmith + oil + Healer Soul Restoration.");
+    }
   }
 }
 

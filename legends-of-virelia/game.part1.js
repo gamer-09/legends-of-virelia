@@ -1758,7 +1758,38 @@ function effectBonusForStat(s, statKey) {
   if (k === "resilience" && hasEffectOnState(s, "fear")) bonus -= 0.06;
   if (k === "arcana" && hasEffectOnState(s, "fear")) bonus -= 0.06;
 
-  return clamp(bonus, -0.35, 0.25);
+  // New permanent debuffs - stronger penalties, no timer, stays until cured by specific person/item
+  if (hasEffectOnState(s, "withered")) {
+    if (k === "strength") bonus -= 0.15;
+    if (k === "resilience") bonus -= 0.10;
+    if (k === "cunning") bonus -= 0.05;
+  }
+  if (hasEffectOnState(s, "hollowed")) {
+    if (k === "arcana") bonus -= 0.14;
+    if (k === "cunning") bonus -= 0.10;
+    if (k === "resilience") bonus -= 0.04;
+  }
+  if (hasEffectOnState(s, "branded")) {
+    if (k === "cunning") bonus -= 0.08;
+    if (k === "resilience") bonus -= 0.08;
+    if (k === "strength") bonus -= 0.04;
+  }
+  if (hasEffectOnState(s, "shadowbound")) {
+    if (k === "arcana") bonus -= 0.12;
+    if (k === "cunning") bonus -= 0.08;
+    if (k === "resilience") bonus -= 0.06;
+  }
+  if (hasEffectOnState(s, "soulfractured")) {
+    if (k === "arcana") bonus -= 0.10;
+    if (k === "resilience") bonus -= 0.12;
+    if (k === "strength") bonus -= 0.06;
+  }
+  if (hasEffectOnState(s, "rusted")) {
+    if (k === "resilience") bonus -= 0.14;
+    if (k === "strength") bonus -= 0.06;
+  }
+
+  return clamp(bonus, -0.55, 0.30);
 }
 
 function useItem(itemKey, ev, targetId) {

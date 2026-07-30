@@ -2349,7 +2349,13 @@ function renderAdminTools() {
     "frostbitten",
     "scorched",
     "entangled",
-    "fear"
+    "fear",
+    "withered",
+    "hollowed",
+    "branded",
+    "shadowbound",
+    "soulfractured",
+    "rusted"
   ];
   const uniqueEffectKeys = [...new Set(effectKeys)].sort();
   const effectSel = document.createElement("select");
@@ -2385,7 +2391,7 @@ function renderAdminTools() {
   effectPermLabel.appendChild(effectPermCheck);
   effectPermLabel.appendChild(effectPermText);
 
-  const allowedPermanentEffects = ['bleeding', 'poisoned', 'cursed', 'weak', 'dazed', 'drained', 'brittle', 'frostbitten', 'scorched', 'entangled', 'fear'];
+  const allowedPermanentEffects = ['bleeding', 'poisoned', 'cursed', 'weak', 'dazed', 'drained', 'brittle', 'frostbitten', 'scorched', 'entangled', 'fear', 'withered', 'hollowed', 'branded', 'shadowbound', 'soulfractured', 'rusted'];
   function updatePermanentCheckboxState() {
     const selEff = String(effectSel.value || "").trim().toLowerCase();
     const canBePerm = allowedPermanentEffects.includes(selEff);
@@ -2462,7 +2468,7 @@ function renderAdminTools() {
     const targetProfile = String(profileSel.value || "").trim();
     const effKey = String(effectSel.value || "").trim();
     const isPerm = effectPermCheck.checked;
-    const allowedPerm = ['bleeding', 'poisoned', 'cursed', 'weak', 'dazed', 'drained', 'brittle', 'frostbitten', 'scorched', 'entangled', 'fear'];
+    const allowedPerm = ['bleeding', 'poisoned', 'cursed', 'weak', 'dazed', 'drained', 'brittle', 'frostbitten', 'scorched', 'entangled', 'fear', 'withered', 'hollowed', 'branded', 'shadowbound', 'soulfractured', 'rusted'];
     if (isPerm && !allowedPerm.includes(effKey.toLowerCase())) {
       setHomeMsg(`Exploit blocked: ${effKey} cannot be made permanent. Only bleeding, poisoned, cursed can be permanent.`);
       return;
@@ -2516,7 +2522,7 @@ function renderAdminTools() {
   btnApplyAll.addEventListener("click", () => {
     const effKey = String(effectSel.value || "").trim();
     const isPermAll = effectPermCheck.checked;
-    const allowedPerm = ['bleeding', 'poisoned', 'cursed', 'weak', 'dazed', 'drained', 'brittle', 'frostbitten', 'scorched', 'entangled', 'fear'];
+    const allowedPerm = ['bleeding', 'poisoned', 'cursed', 'weak', 'dazed', 'drained', 'brittle', 'frostbitten', 'scorched', 'entangled', 'fear', 'withered', 'hollowed', 'branded', 'shadowbound', 'soulfractured', 'rusted'];
     if (isPermAll && !allowedPerm.includes(effKey.toLowerCase())) {
       setHomeMsg(`Exploit blocked: ${effKey} cannot be made permanent for all. Only bleeding, poisoned, cursed allowed.`);
       return;
