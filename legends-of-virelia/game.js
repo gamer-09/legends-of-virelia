@@ -4525,10 +4525,12 @@ function renderAdminTools() {
     if (!targetProfile) { setHomeMsg("Select target"); return; }
     if (!effKey) { setHomeMsg("Select effect"); return; }
     stageEffectChange(targetProfile, (staged) => {
-      staged.effects[effKey] = { key: effKey, expiresAt: (typeof nowMs === 'function' ? nowMs() : Date.now()) + durMs };
-      if (effKey === 'bleeding') staged.effects[effKey].nextTickAt = (typeof nowMs === 'function' ? nowMs() : Date.now()) + 5000;
-      if (effKey === 'aether') staged.effects[effKey].nextTickAt = (typeof nowMs === 'function' ? nowMs() : Date.now()) + 4000;
-      if (effKey === 'poisoned') staged.effects[effKey].nextTickAt = (typeof nowMs === 'function' ? nowMs() : Date.now()) + 4000;
+      // FIX: store as pausedRemaining so timer starts exactly when player next joins, not when staged
+      const now = (typeof nowMs === 'function' ? nowMs() : Date.now());
+      staged.effects[effKey] = { key: effKey, pausedRemaining: durMs, pausedAt: now, _paused: true, pausedNextTickRemaining: 0 };
+      if (effKey === 'bleeding') staged.effects[effKey].pausedNextTickRemaining = 5000;
+      if (effKey === 'aether') staged.effects[effKey].pausedNextTickRemaining = 4000;
+      if (effKey === 'poisoned') staged.effects[effKey].pausedNextTickRemaining = 4000;
     }, `Staged ${effKey} (${durSec}s) for ${targetProfile}.`);
   });
 
@@ -4567,11 +4569,12 @@ function renderAdminTools() {
     for (const prof of allProfiles) {
       if (prof === ADMIN_PROFILE) continue;
       stageEffectChange(prof, (staged) => {
+        const now = (typeof nowMs === 'function' ? nowMs() : Date.now());
         staged.effects = staged.effects || {};
-        staged.effects[effKey] = { key: effKey, expiresAt: (typeof nowMs === 'function' ? nowMs() : Date.now()) + durMs };
-        if (effKey === 'bleeding') staged.effects[effKey].nextTickAt = (typeof nowMs === 'function' ? nowMs() : Date.now()) + 5000;
-        if (effKey === 'aether') staged.effects[effKey].nextTickAt = (typeof nowMs === 'function' ? nowMs() : Date.now()) + 4000;
-        if (effKey === 'poisoned') staged.effects[effKey].nextTickAt = (typeof nowMs === 'function' ? nowMs() : Date.now()) + 4000;
+        staged.effects[effKey] = { key: effKey, pausedRemaining: durMs, pausedAt: now, _paused: true, pausedNextTickRemaining: 0 };
+        if (effKey === 'bleeding') staged.effects[effKey].pausedNextTickRemaining = 5000;
+        if (effKey === 'aether') staged.effects[effKey].pausedNextTickRemaining = 4000;
+        if (effKey === 'poisoned') staged.effects[effKey].pausedNextTickRemaining = 4000;
       }, `Staged ${effKey} for ${prof}.`);
     }
   });
