@@ -4550,6 +4550,33 @@ function renderAdminTools() {
   effectDurInput.type = "number";
   effectDurInput.min = "1";
 
+  const effectPermLabel = document.createElement("label");
+  effectPermLabel.style.display = "flex";
+  effectPermLabel.style.alignItems = "center";
+  effectPermLabel.style.gap = "6px";
+  effectPermLabel.className = "hint";
+  effectPermLabel.style.marginLeft = "8px";
+  const effectPermCheck = document.createElement("input");
+  effectPermCheck.type = "checkbox";
+  effectPermCheck.id = "adminEffectPerm";
+  const effectPermText = document.createElement("span");
+  effectPermText.textContent = "Permanent (no timer)";
+  effectPermText.title = "If checked, effect has NO timer and stays forever until cured by Healer/Enchanter/item. Admin dashboard will show PERM.";
+  effectPermLabel.appendChild(effectPermCheck);
+  effectPermLabel.appendChild(effectPermText);
+
+  effectPermCheck.addEventListener("change", () => {
+    if (effectPermCheck.checked) {
+      effectDurInput.disabled = true;
+      effectDurInput.style.opacity = "0.4";
+      effectDurInput.title = "Timer disabled - permanent effect has no duration";
+    } else {
+      effectDurInput.disabled = false;
+      effectDurInput.style.opacity = "1";
+      effectDurInput.title = "";
+    }
+  });
+
   const effectRow = document.createElement("div");
   effectRow.className = "row";
   effectRow.style.flexWrap = "wrap";
@@ -4557,6 +4584,7 @@ function renderAdminTools() {
   effectRow.appendChild(profileSel);
   effectRow.appendChild(effectSel);
   effectRow.appendChild(effectDurInput);
+  effectRow.appendChild(effectPermLabel);
   effectWrap.appendChild(effectRow);
 
   const effectBtnRow = document.createElement("div");
@@ -4568,17 +4596,23 @@ function renderAdminTools() {
   btnApplyEffect.addEventListener("click", () => {
     const targetProfile = String(profileSel.value || "").trim();
     const effKey = String(effectSel.value || "").trim();
+    const isPerm = effectPermCheck.checked;
     const durSec = parseFloat(effectDurInput.value || "15");
     const durMs = Math.max(1000, Math.floor((isFinite(durSec) ? durSec : 15) * 1000));
     if (!targetProfile) { setHomeMsg("Select target"); return; }
     if (!effKey) { setHomeMsg("Select effect"); return; }
     stageEffectChange(targetProfile, (staged) => {
-      // FIX: store as pausedRemaining so timer starts exactly when player next joins, not when staged
       const now = (typeof nowMs === 'function' ? nowMs() : Date.now());
-      staged.effects[effKey] = { key: effKey, pausedRemaining: durMs, pausedAt: now, _paused: true, pausedNextTickRemaining: 0 };
-      if (effKey === 'bleeding') staged.effects[effKey].pausedNextTickRemaining = 5000;
-      if (effKey === 'aether') staged.effects[effKey].pausedNextTickRemaining = 4000;
-      if (effKey === 'poisoned') staged.effects[effKey].pausedNextTickRemaining = 4000;
+      if (isPerm) {
+        // Permanent: no timer, stays until cured by Healer/Enchanter/item
+        staged.effects[effKey] = { key: effKey, permanent: true, appliedAt: now, isPermanentAdmin: true };
+      } else {
+        // Timed: stored as pausedRemaining so timer starts exactly when player next joins
+        staged.effects[effKey] = { key: effKey, pausedRemaining: durMs, pausedAt: now, _paused: true, pausedNextTickRemaining: 0 };
+        if (effKey === 'bleeding') staged.effects[effKey].pausedNextTickRemaining = 5000;
+        if (effKey === 'aether') staged.effects[effKey].pausedNextTickRemaining = 4000;
+        if (effKey === 'poisoned') staged.effects[effKey].pausedNextTickRemaining = 4000;
+      }
     }, `Staged ${effKey} (${durSec}s) for ${targetProfile}.`);
   });
 
@@ -4614,16 +4648,21 @@ function renderAdminTools() {
     const durSec = parseFloat(effectDurInput.value || "15");
     const durMs = Math.max(1000, Math.floor((isFinite(durSec) ? durSec : 15) * 1000));
     const allProfiles = (typeof listSaveProfiles === 'function') ? listSaveProfiles() : [];
+    const isPermAll = effectPermCheck.checked;
     for (const prof of allProfiles) {
       if (prof === ADMIN_PROFILE) continue;
       stageEffectChange(prof, (staged) => {
         const now = (typeof nowMs === 'function' ? nowMs() : Date.now());
         staged.effects = staged.effects || {};
-        staged.effects[effKey] = { key: effKey, pausedRemaining: durMs, pausedAt: now, _paused: true, pausedNextTickRemaining: 0 };
-        if (effKey === 'bleeding') staged.effects[effKey].pausedNextTickRemaining = 5000;
-        if (effKey === 'aether') staged.effects[effKey].pausedNextTickRemaining = 4000;
-        if (effKey === 'poisoned') staged.effects[effKey].pausedNextTickRemaining = 4000;
-      }, `Staged ${effKey} for ${prof}.`);
+        if (isPermAll) {
+          staged.effects[effKey] = { key: effKey, permanent: true, appliedAt: now, isPermanentAdmin: true };
+        } else {
+          staged.effects[effKey] = { key: effKey, pausedRemaining: durMs, pausedAt: now, _paused: true, pausedNextTickRemaining: 0 };
+          if (effKey === 'bleeding') staged.effects[effKey].pausedNextTickRemaining = 5000;
+          if (effKey === 'aether') staged.effects[effKey].pausedNextTickRemaining = 4000;
+          if (effKey === 'poisoned') staged.effects[effKey].pausedNextTickRemaining = 4000;
+        }
+      }, `Staged ${effKey} ${isPermAll ? '(PERM)' : ''} for ${prof}.`);
     }
   });
 
@@ -4691,6 +4730,10 @@ function renderAdminTools() {
       const effs = Object.values(effective.effects).map(e => {
         if (!e) return null;
         const key = e.key;
+        if (e.permanent) {
+          const stagedMark = staged ? " [STAGED PERM]" : " [PERM]";
+          return `${key}: PERMANENT⚠️${stagedMark}`;
+        }
         let sec = 0;
         if (typeof e.pausedRemaining === 'number') sec = Math.ceil(e.pausedRemaining/1000);
         else if (typeof e.expiresAt === 'number') sec = Math.max(0, Math.ceil((e.expiresAt - (typeof nowMs === 'function' ? nowMs() : Date.now()))/1000));
