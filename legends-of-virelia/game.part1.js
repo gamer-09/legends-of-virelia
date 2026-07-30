@@ -1,4 +1,4 @@
-﻿const el = (id) => document.getElementById(id);
+const el = (id) => document.getElementById(id);
 
 const profileNameEl = el("profileName");
 const btnNew = el("btnNew");
@@ -60,13 +60,21 @@ function syncSidebarButtons() {
   const restCd = hasEffectOnState(s, "rested");
   const inDraft = hasActiveLevelUpDraft(s);
 
+  // Rest now stops all actions: when rested active, block everything except Save/Logout/Settings
+  const restBlocking = !!restCd;
+
   if (btnRest) btnRest.disabled = inCombat || restCd || inDraft;
-  if (btnStatus) btnStatus.disabled = inDraft;
-  if (btnInventory) btnInventory.disabled = inDraft;
-  if (btnSkills) btnSkills.disabled = inDraft;
-  if (btnParty) btnParty.disabled = inDraft;
-  if (btnAchievements) btnAchievements.disabled = inDraft;
-  if (btnSave) btnSave.disabled = inDraft;
+  if (btnStatus) btnStatus.disabled = inDraft || restBlocking || inCombat;
+  if (btnInventory) btnInventory.disabled = inDraft || restBlocking || inCombat;
+  if (btnSkills) btnSkills.disabled = inDraft || restBlocking || inCombat;
+  if (btnParty) btnParty.disabled = inDraft || restBlocking || inCombat;
+  if (btnAchievements) btnAchievements.disabled = inDraft || restBlocking || inCombat;
+  if (btnSave) btnSave.disabled = inDraft; // save always allowed even during rest
+  const btnDesignEl = document.getElementById('btnDesign');
+  if (btnDesignEl) btnDesignEl.disabled = false; // settings always allowed
+  const btnLogoutEl = document.getElementById('btnLogout');
+  if (btnLogoutEl) btnLogoutEl.disabled = inDraft; // allow logout even during rest? keep enabled unless draft
+  // Also disable quest board interactions via visual cue - handled in renderQuestList via check
 }
 
 const LOG_MAX = 600;

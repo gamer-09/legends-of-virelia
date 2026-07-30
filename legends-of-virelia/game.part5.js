@@ -123,13 +123,37 @@ function runStoryChoice(ch) {
 
 function showChoices(choices) {
   clearChoices();
+  const isRested = !!(state && typeof hasEffectOnState === 'function' && hasEffectOnState(state, "rested"));
+  const isInCombat = !!(state && typeof isCombatActive === 'function' && isCombatActive(state));
+  const isInDraft = !!(state && typeof hasActiveLevelUpDraft === 'function' && hasActiveLevelUpDraft(state));
+  
   for (const c of choices) {
     const b = document.createElement("button");
     b.textContent = c.label;
     if (c.className) b.className = c.className;
-    if (c.disabled) b.disabled = true;
+    // Disable all actions when resting (except back/cancel/close/leave to allow navigation, but main actions blocked)
+    if (c.disabled) {
+      b.disabled = true;
+    } else if (isRested && !isInCombat && !isInDraft) {
+      const labelLower = String(c.label||"").toLowerCase();
+      const isBack = labelLower.includes("back") || labelLower.includes("cancel") || labelLower.includes("close") || labelLower.includes("leave") || labelLower.includes("town") || labelLower.includes("crossroads") || labelLower.includes("gate");
+      // Block main gameplay actions during rest, allow only back/cancel type
+      if (!isBack) {
+        b.disabled = true;
+        b.title = "Resting... All actions paused until rested ends";
+      }
+    }
     b.addEventListener("click", () => {
       if (guardLevelUpDraft()) return;
+      if (state && typeof hasEffectOnState === 'function' && hasEffectOnState(state, "rested") && !isInCombat && !isInDraft) {
+        const labelLower = String(c.label||"").toLowerCase();
+        const isBack = labelLower.includes("back") || labelLower.includes("cancel") || labelLower.includes("close") || labelLower.includes("leave") || labelLower.includes("town") || labelLower.includes("crossroads") || labelLower.includes("gate");
+        if (!isBack && !c.disabled) {
+          appendLog("You are resting. All actions paused until rested ends.");
+          render();
+          return;
+        }
+      }
       const inEvent = !!(state && state.world && state.world.pendingEvent);
       if (!inEvent) {
         const beforeLen = (state && Array.isArray(state.log)) ? state.log.length : 0;
@@ -144,6 +168,22 @@ function showChoices(choices) {
       if (state && state.world && state.world.pendingEvent) render();
     });
     choicesEl.appendChild(b);
+  }
+
+  if (isRested && !isInCombat && !isInDraft) {
+    const restHint = document.createElement("div");
+    restHint.className = "hint";
+    restHint.style.marginTop = "10px";
+    restHint.style.color = "#2ad37b";
+    restHint.style.fontWeight = "700";
+    try {
+      const eff = state.effects && state.effects.rested;
+      const sec = eff && typeof eff.expiresAt === 'number' ? Math.max(0, Math.ceil((eff.expiresAt - Date.now())/1000)) : 0;
+      restHint.textContent = "💤 Resting... All actions paused for " + sec + "s. Wait until rested ends to continue.";
+    } catch {
+      restHint.textContent = "💤 Resting... All actions paused until rested ends.";
+    }
+    choicesEl.appendChild(restHint);
   }
 }
 
