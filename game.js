@@ -4658,11 +4658,25 @@ function renderAdminTools() {
   effectPermLabel.appendChild(effectPermCheck);
   effectPermLabel.appendChild(effectPermText);
 
-  const allowedPermanentEffects = ['bleeding', 'poisoned', 'cursed', 'weak', 'dazed', 'drained', 'brittle', 'frostbitten', 'scorched', 'entangled', 'fear', 'withered', 'hollowed', 'branded', 'shadowbound', 'soulfractured', 'rusted'];
-  function updatePermanentCheckboxState() {
+  const allowedPermanentEffects = ['withered', 'hollowed', 'branded', 'shadowbound', 'soulfractured', 'rusted', 'bleeding', 'poisoned', 'cursed', 'weak', 'dazed', 'drained', 'brittle', 'frostbitten', 'scorched', 'entangled', 'fear'];
+    const alwaysPermanentEffects = ['withered', 'hollowed', 'branded', 'shadowbound', 'soulfractured', 'rusted'];
+  const optionalPermanentEffects = ['bleeding', 'poisoned', 'cursed', 'weak', 'dazed', 'drained', 'brittle', 'frostbitten', 'scorched', 'entangled', 'fear'];
+    function updatePermanentCheckboxState() {
     const selEff = String(effectSel.value || "").trim().toLowerCase();
+    const isAlwaysPerm = alwaysPermanentEffects.includes(selEff);
     const canBePerm = allowedPermanentEffects.includes(selEff);
-    if (!canBePerm) {
+
+    if (isAlwaysPerm) {
+      effectPermCheck.checked = true;
+      effectPermCheck.disabled = true;
+      effectPermLabel.style.opacity = "0.9";
+      effectPermCheck.title = "This effect is ALWAYS permanent (no timer) - stays until cured by specific NPC/item. No duration needed.";
+      effectPermText.title = effectPermCheck.title;
+      effectPermText.textContent = "Always Permanent (no timer)";
+      effectDurInput.disabled = true;
+      effectDurInput.style.opacity = "0.3";
+      effectDurInput.title = "This permanent debuff has no timer - stays until cured";
+    } else if (!canBePerm) {
       if (effectPermCheck.checked) {
         effectPermCheck.checked = false;
       }
@@ -4670,6 +4684,7 @@ function renderAdminTools() {
       effectPermLabel.style.opacity = "0.5";
       effectPermCheck.title = "This effect cannot be made permanent - only " + allowedPermanentEffects.join(", ") + " can be permanent. Buffs like shielding, aether would be exploit.";
       effectPermText.title = effectPermCheck.title;
+      effectPermText.textContent = "Permanent (no timer)";
       effectDurInput.disabled = false;
       effectDurInput.style.opacity = "1";
       effectDurInput.title = "";
@@ -4678,14 +4693,19 @@ function renderAdminTools() {
       effectPermLabel.style.opacity = "1";
       effectPermCheck.title = "If checked, effect has NO timer and stays forever until cured by Healer/Enchanter/item.";
       effectPermText.title = effectPermCheck.title;
-      // keep duration disabled if checked
+      effectPermText.textContent = "Permanent (no timer)";
       if (effectPermCheck.checked) {
         effectDurInput.disabled = true;
         effectDurInput.style.opacity = "0.4";
         effectDurInput.title = "Timer disabled - permanent effect has no duration";
+      } else {
+        effectDurInput.disabled = false;
+        effectDurInput.style.opacity = "1";
+        effectDurInput.title = "";
       }
     }
   }
+
 
   effectPermCheck.addEventListener("change", () => {
     const selEff = String(effectSel.value || "").trim().toLowerCase();
@@ -4735,7 +4755,7 @@ function renderAdminTools() {
     const targetProfile = String(profileSel.value || "").trim();
     const effKey = String(effectSel.value || "").trim();
     const isPerm = effectPermCheck.checked;
-    const allowedPerm = ['bleeding', 'poisoned', 'cursed', 'weak', 'dazed', 'drained', 'brittle', 'frostbitten', 'scorched', 'entangled', 'fear', 'withered', 'hollowed', 'branded', 'shadowbound', 'soulfractured', 'rusted'];
+    const allowedPerm = ['withered', 'hollowed', 'branded', 'shadowbound', 'soulfractured', 'rusted', 'bleeding', 'poisoned', 'cursed', 'weak', 'dazed', 'drained', 'brittle', 'frostbitten', 'scorched', 'entangled', 'fear'];
     if (isPerm && !allowedPerm.includes(effKey.toLowerCase())) {
       setHomeMsg(`Exploit blocked: ${effKey} cannot be made permanent. Only bleeding, poisoned, cursed can be permanent.`);
       return;
@@ -4789,7 +4809,7 @@ function renderAdminTools() {
   btnApplyAll.addEventListener("click", () => {
     const effKey = String(effectSel.value || "").trim();
     const isPermAll = effectPermCheck.checked;
-    const allowedPerm = ['bleeding', 'poisoned', 'cursed', 'weak', 'dazed', 'drained', 'brittle', 'frostbitten', 'scorched', 'entangled', 'fear', 'withered', 'hollowed', 'branded', 'shadowbound', 'soulfractured', 'rusted'];
+    const allowedPerm = ['withered', 'hollowed', 'branded', 'shadowbound', 'soulfractured', 'rusted', 'bleeding', 'poisoned', 'cursed', 'weak', 'dazed', 'drained', 'brittle', 'frostbitten', 'scorched', 'entangled', 'fear'];
     if (isPermAll && !allowedPerm.includes(effKey.toLowerCase())) {
       setHomeMsg(`Exploit blocked: ${effKey} cannot be made permanent for all. Only bleeding, poisoned, cursed allowed.`);
       return;
