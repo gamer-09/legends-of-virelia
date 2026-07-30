@@ -385,11 +385,21 @@ body.theme-parchment button {
   font-size: 12px;
   letter-spacing: 0.3px;
   box-shadow: 0 2px 6px rgba(61,43,31,0.15);
+  transition: all 0.12s ease;
 }
-body.theme-parchment button:hover { background: linear-gradient(180deg, #fffef8, #f5f1e8); border-color: #8b7355; transform: translateY(-1px); }
-body.theme-parchment button:active { transform: translateY(0px); }
-body.theme-parchment button.secondary { background: #fffef8; border-color: #c2b8a3; }
+body.theme-parchment button:hover {
+  background: linear-gradient(180deg, #e8dcc6, #d6c7a8);
+  border-color: #5a3a28;
+  color: #1a0f08;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(61,43,31,0.22);
+  filter: brightness(1.02);
+}
+body.theme-parchment button:active { transform: translateY(0px); background: #d6c7a8; }
+body.theme-parchment button.secondary { background: #fffef8; border-color: #c2b8a3; color: #3d2b1f; }
+body.theme-parchment button.secondary:hover { background: #f5f1e8; border-color: #8b7355; color: #2c1e13; }
 body.theme-parchment button.danger { background: linear-gradient(180deg, #f8d7da, #f1b0b7); border-color: #c78; color: #5a1a1a; }
+body.theme-parchment button.danger:hover { background: linear-gradient(180deg, #f1b0b7, #e99da5); border-color: #a44; color: #fff; }
 body.theme-parchment button.tab { background: #fffef8; border: 1px dashed #c2b8a3; border-radius: 999px; }
 body.theme-parchment button.tab.active { background: #3d2b1f; color: #f5f1e8; border-color: #3d2b1f; }
 body.theme-parchment .output {
