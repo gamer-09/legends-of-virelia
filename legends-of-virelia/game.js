@@ -35,8 +35,8 @@ const btnRest = el("btnRest");
 const btnStatus = el("btnStatus");
 const btnInventory = el("btnInventory");
 const btnSkills = el("btnSkills");
+const btnParty = el("btnParty");
 const btnAchievements = el("btnAchievements");
-const btnDesign = el("btnDesign");
 const btnSave = el("btnSave");
 
 const fxOverlay = el("fxOverlay");
@@ -60,13 +60,21 @@ function syncSidebarButtons() {
   const restCd = hasEffectOnState(s, "rested");
   const inDraft = hasActiveLevelUpDraft(s);
 
+  // Rest now stops all actions: when rested active, block everything except Save/Logout/Settings
+  const restBlocking = !!restCd;
+
   if (btnRest) btnRest.disabled = inCombat || restCd || inDraft;
-  if (btnStatus) btnStatus.disabled = inDraft;
-  if (btnInventory) btnInventory.disabled = inDraft;
-  if (btnSkills) btnSkills.disabled = inDraft;
-  if (btnAchievements) btnAchievements.disabled = inDraft;
-  if (btnDesign) btnDesign.disabled = inDraft;
-  if (btnSave) btnSave.disabled = inDraft;
+  if (btnStatus) btnStatus.disabled = inDraft || restBlocking || inCombat;
+  if (btnInventory) btnInventory.disabled = inDraft || restBlocking || inCombat;
+  if (btnSkills) btnSkills.disabled = inDraft || restBlocking || inCombat;
+  if (btnParty) btnParty.disabled = inDraft || restBlocking || inCombat;
+  if (btnAchievements) btnAchievements.disabled = inDraft || restBlocking || inCombat;
+  if (btnSave) btnSave.disabled = inDraft; // save always allowed even during rest
+  const btnDesignEl = document.getElementById('btnDesign');
+  if (btnDesignEl) btnDesignEl.disabled = false; // settings always allowed
+  const btnLogoutEl = document.getElementById('btnLogout');
+  if (btnLogoutEl) btnLogoutEl.disabled = inDraft; // allow logout even during rest? keep enabled unless draft
+  // Also disable quest board interactions via visual cue - handled in renderQuestList via check
 }
 
 const LOG_MAX = 600;
@@ -134,6 +142,7 @@ const ITEM_CATALOG = {
   tonic: { label: "Mana Tonic", consumable: true, desc: "Bitter blue liquid that sharpens focus. Restores mana." },
   health_potion: { label: "Health Potion", consumable: true, desc: "A red draught that quickly mends wounds." },
   mana_potion: { label: "Mana Potion", consumable: true, desc: "A violet draught that replenishes arcane reserves." },
+  phoenix_feather: { label: "Phoenix Feather", consumable: true, desc: "A legendary feather that reignites a fading spark. Revives a fallen companion and fully restores their HP and mana." },
   stamina_draught: { label: "Stamina Draught", consumable: true, desc: "A harsh brew that pushes your body past fatigue." },
   antidote: { label: "Antidote", consumable: true, desc: "Neutralizes common poisons and venoms." },
   elixir: { label: "Elixir", consumable: true, desc: "Rare mixture said to restore both body and mind." },
@@ -689,6 +698,7 @@ const MARKET_EXCLUDE_KEYS = new Set([
 ]);
 
 const MARKET_LEGENDARY_KEYS = new Set([
+  "phoenix_feather",
   "phoenix_draught",
   "titanblood_elixir",
   "sunfire_serum",
@@ -741,6 +751,10 @@ function marketRankForItem(key) {
   const def = itemDef(k);
   const kk = k.toLowerCase();
 
+  if (kk.startsWith("loc_")) {
+    return { tier: 1, rank: "Curio", badge: "normal", mult: 1.6 };
+  }
+
   if (def.consumable) {
     if (kk.startsWith("consumable_")) return { tier: 0, rank: "Common", badge: "easy", mult: 1.0 };
     if (/(phoenix|titanblood|sunfire|voidsalt|wyrmhide|aether|stormseed|mindglass|shadowstep|ironbark)/i.test(kk)) {
@@ -755,12 +769,20 @@ function marketRankForItem(key) {
   if (/(plate|dragonscale|stormguard|shadowweave|runebound|arcane_focus|sunstorm|moonlit|starfall|embercore|wyrmfang|reaver|frostbite|whispersteel)/i.test(kk)) {
     return { tier: 2, rank: "Rare", badge: "hard", mult: 3.6 };
   }
+  if (equipmentSlotGroupForItem(k)) {
+    return { tier: 1, rank: "Uncommon", badge: "normal", mult: 1.6 };
+  }
   return { tier: 0, rank: "Common", badge: "easy", mult: 1.1 };
 }
 
 let marketStockCache = null;
+let marketStockCacheKey = "";
 function marketStockKeys() {
-  if (Array.isArray(marketStockCache) && marketStockCache.length) return marketStockCache;
+  const seed = (!isAdminProfile(state?.profile) && !!state?.flags?.["exile:active"] && typeof state?.flags?.["exile:seed"] === "number")
+    ? (state.flags["exile:seed"] >>> 0)
+    : 0;
+  const cacheKey = String(seed);
+  if (Array.isArray(marketStockCache) && marketStockCache.length && marketStockCacheKey === cacheKey) return marketStockCache;
   const keys = Object.keys(ITEM_CATALOG || {});
   const out = [];
   for (const k of keys) {
@@ -770,50 +792,80 @@ function marketStockKeys() {
     if (kk.startsWith("loc_")) continue;
     out.push(kk);
   }
-  out.sort((a, b) => {
-    const ra = marketRankForItem(a);
-    const rb = marketRankForItem(b);
-    if (rb.tier !== ra.tier) return rb.tier - ra.tier;
-    const pa = marketPriceForItem(a);
-    const pb = marketPriceForItem(b);
-    if (pb !== pa) return pb - pa;
-    return itemLabel(a).localeCompare(itemLabel(b));
-  });
+  if (!seed) {
+    out.sort((a, b) => {
+      const ra = marketRankForItem(a);
+      const rb = marketRankForItem(b);
+      if (rb.tier !== ra.tier) return rb.tier - ra.tier;
+      const pa = marketPriceForItem(a);
+      const pb = marketPriceForItem(b);
+      if (pb !== pa) return pb - pa;
+      return itemLabel(a).localeCompare(itemLabel(b));
+    });
+  } else {
+    out.sort((a, b) => {
+      const ha = (hashString(`market:${seed}:${a}`) >>> 0);
+      const hb = (hashString(`market:${seed}:${b}`) >>> 0);
+      if (ha !== hb) return ha < hb ? -1 : 1;
+      return a.localeCompare(b);
+    });
+  }
   marketStockCache = out;
+  marketStockCacheKey = cacheKey;
   return out;
 }
 
 function marketPriceForItem(key) {
   const k = String(key || "").trim();
+  if (k === "phoenix_feather") return 5000;
   const p = {
     bandage: 10,
     health_potion: 18,
     mana_potion: 15,
     tonic: 12,
+    stamina_draught: 18,
     smoke_bomb: 22,
     antidote: 16,
     ration: 5,
     torch: 4,
+    waterskin: 8,
     lockpick: 8,
+
+    herb_sageleaf: 12,
+    herb_nightbloom: 16,
+    ore_iron: 30,
+    ore_silver: 60,
+    cloth: 18,
+    leather: 22,
+    lumber: 16,
+    rune_shard: 90,
+    ember_gem: 120,
+
     dagger: 25,
     short_sword: 45,
     iron_sword: 70,
+    steel_sword: 95,
+    longbow: 75,
+    crossbow: 95,
     staff: 55,
+    wand: 60,
     leather_armor: 60,
     chainmail: 110,
+    plate_armor: 160,
     cloak: 35,
     boots: 28,
+    gloves: 22,
     ring_of_focus: 85,
     amulet_of_vigor: 95,
     charm: 30,
   };
   const def = itemDef(k);
   const rank = marketRankForItem(k);
+  const kk = k.toLowerCase();
   const base = (typeof p[k] === "number")
     ? p[k]
-    : ((def.consumable ? 14 : 60));
+    : (kk.startsWith("loc_") ? 40 : (def.consumable ? 14 : 60));
 
-  const kk = k.toLowerCase();
   let kindMult = 1.0;
   if (!def.consumable) {
     if (/(sword|katana|spear|hammer|dagger|crossbow|halberd|longbow|staff|wand)/i.test(kk)) kindMult = 1.35;
@@ -837,7 +889,6 @@ function canSellItemInMarket(key) {
   const k = String(key || "").trim();
   if (!k) return false;
   if (MARKET_EXCLUDE_KEYS.has(k)) return false;
-  if (k.startsWith("loc_")) return false;
   return true;
 }
 
@@ -845,12 +896,60 @@ function marketSellPriceForItem(key) {
   const k = String(key || "").trim();
   if (!k) return 0;
   const buy = marketPriceForItem(k);
-  return Math.max(1, Math.floor(buy * 0.6));
+  const tier = clamp(Math.floor(marketRankForItem(k)?.tier || 0), 0, 4);
+  const rateByTier = { 0: 0.65, 1: 0.68, 2: 0.70, 3: 0.72, 4: 0.74 };
+  const rate = (typeof rateByTier[tier] === "number") ? rateByTier[tier] : 0.65;
+  return Math.max(1, Math.floor(buy * rate));
 }
 
 const BLACKSMITH_RECIPES = [
+  { key: "forge_dagger", label: "Forge Dagger", out: "dagger", outQty: 1, gold: 22, req: { ore_iron: 1 } },
+  { key: "forge_short_sword", label: "Forge Short Sword", out: "short_sword", outQty: 1, gold: 34, req: { ore_iron: 1, leather: 1 } },
   { key: "forge_iron_sword", label: "Forge Iron Sword", out: "iron_sword", outQty: 1, gold: 40, req: { ore_iron: 2 } },
+  { key: "forge_steel_sword", label: "Forge Steel Sword", out: "steel_sword", outQty: 1, gold: 90, req: { ore_iron: 2, ore_silver: 1 } },
   { key: "forge_chainmail", label: "Forge Chainmail", out: "chainmail", outQty: 1, gold: 75, req: { ore_iron: 3, leather: 1 } },
+  { key: "forge_plate_armor", label: "Forge Plate Armor", out: "plate_armor", outQty: 1, gold: 140, req: { ore_iron: 4, ore_silver: 1, leather: 1 } },
+  { key: "forge_crossbow", label: "Forge Crossbow", out: "crossbow", outQty: 1, gold: 95, req: { ore_iron: 2, lumber: 1 } },
+  { key: "forge_arcane_staff", label: "Forge Arcane Focus Staff", out: "arcane_focus_staff", outQty: 1, gold: 180, req: { ore_silver: 2, rune_shard: 1, lumber: 1 } },
+  { key: "forge_ember_warhammer", label: "Forge Embercore Warhammer", out: "embercore_warhammer", outQty: 1, gold: 210, req: { ore_iron: 3, ember_gem: 1 } },
+  { key: "forge_reaver_crossbow", label: "Forge Reaver Crossbow", out: "reaver_crossbow", outQty: 1, gold: 240, req: { ore_iron: 3, ore_silver: 1, lumber: 2 } },
+];
+
+const ALCHEMIST_RECIPES = [
+  { key: "brew_health_potion", label: "Brew Health Potion", out: "health_potion", outQty: 1, gold: 12, req: { herb_sageleaf: 1 } },
+  { key: "brew_mana_potion", label: "Brew Mana Potion", out: "mana_potion", outQty: 1, gold: 14, req: { herb_nightbloom: 1, herb_sageleaf: 1 } },
+  { key: "brew_tonic", label: "Brew Mana Tonic", out: "tonic", outQty: 1, gold: 10, req: { herb_nightbloom: 1 } },
+  { key: "brew_antidote", label: "Brew Antidote", out: "antidote", outQty: 1, gold: 10, req: { herb_nightbloom: 1 } },
+  { key: "brew_smoke", label: "Pack Smoke Bomb", out: "smoke_bomb", outQty: 1, gold: 14, req: { herb_nightbloom: 1, cloth: 1 } },
+  { key: "brew_stamina", label: "Distill Stamina Draught", out: "stamina_draught", outQty: 1, gold: 16, req: { herb_sageleaf: 1, herb_nightbloom: 1 } },
+  { key: "brew_ironbark", label: "Mix Ironbark Poultice", out: "ironbark_poultice", outQty: 1, gold: 16, req: { herb_sageleaf: 2 } },
+  { key: "brew_aether_salve", label: "Blend Aether Salve", out: "aether_salve", outQty: 1, gold: 22, req: { herb_sageleaf: 1, herb_nightbloom: 1 } },
+  { key: "brew_stormseed", label: "Grind Stormseed Powder", out: "stormseed_powder", outQty: 1, gold: 55, req: { herb_nightbloom: 2, ember_gem: 1 } },
+  { key: "brew_mindglass", label: "Distill Mindglass Vial", out: "mindglass_vial", outQty: 1, gold: 55, req: { herb_sageleaf: 1, rune_shard: 1 } },
+];
+
+const ENCHANTER_RECIPES = [
+  { key: "inscribe_ring_focus", label: "Inscribe Ring of Focus", out: "ring_of_focus", outQty: 1, gold: 45, req: { rune_shard: 2 } },
+  { key: "inscribe_amulet_vigor", label: "Inscribe Amulet of Vigor", out: "amulet_of_vigor", outQty: 1, gold: 65, req: { rune_shard: 2, ember_gem: 1 } },
+  { key: "set_charm", label: "Set a Charm", out: "charm", outQty: 1, gold: 40, req: { rune_shard: 1, ember_gem: 1 } },
+  { key: "bind_runebound_wand", label: "Bind Runebound Wand", out: "runebound_wand", outQty: 1, gold: 90, req: { rune_shard: 3, ember_gem: 1 } },
+  { key: "craft_mirror_charm", label: "Craft Mirror Charm", out: "mirror_charm", outQty: 1, gold: 60, req: { rune_shard: 1, ember_gem: 1 } },
+  { key: "craft_ember_circlet", label: "Set Ember Gem Circlet", out: "ember_gem_circlet", outQty: 1, gold: 75, req: { ember_gem: 2, rune_shard: 1 } },
+  { key: "craft_runeheart", label: "Forge Runeheart Pendant", out: "runeheart_pendant", outQty: 1, gold: 85, req: { rune_shard: 2, ember_gem: 1 } },
+  { key: "craft_lantern_silent", label: "Bind Lantern of Silent Paths", out: "lantern_of_silent_paths", outQty: 1, gold: 110, req: { rune_shard: 2, ember_gem: 1, lumber: 1 } },
+  { key: "craft_true_sight", label: "Inscribe Ring of True Sight", out: "ring_of_true_sight", outQty: 1, gold: 150, req: { rune_shard: 4, ember_gem: 2 } },
+];
+
+const CRAFTER_RECIPES = [
+  { key: "craft_bandages", label: "Cut Bandages", out: "bandage", outQty: 2, gold: 2, req: { cloth: 1 } },
+  { key: "craft_waterskin", label: "Stitch Waterskin", out: "waterskin", outQty: 1, gold: 4, req: { leather: 1 } },
+  { key: "craft_leather_armor", label: "Craft Leather Armor", out: "leather_armor", outQty: 1, gold: 35, req: { leather: 3 } },
+  { key: "sew_cloak", label: "Sew Cloak", out: "cloak", outQty: 1, gold: 25, req: { cloth: 2, leather: 1 } },
+  { key: "craft_boots", label: "Craft Boots", out: "boots", outQty: 1, gold: 22, req: { leather: 2, cloth: 1 } },
+  { key: "stitch_gloves", label: "Stitch Gloves", out: "gloves", outQty: 1, gold: 18, req: { leather: 2 } },
+  { key: "craft_longbow", label: "Craft Longbow", out: "longbow", outQty: 1, gold: 40, req: { lumber: 2, leather: 1 } },
+  { key: "make_torches", label: "Make Torches", out: "torch", outQty: 2, gold: 4, req: { lumber: 1 } },
+  { key: "craft_lockpick", label: "Make Lockpicks", out: "lockpick", outQty: 1, gold: 8, req: { ore_iron: 1 } },
 ];
 
 function canCraftRecipe(s, recipe) {
@@ -894,6 +993,93 @@ function craftRecipeAtBlacksmith(recipeKey) {
   return true;
 }
 
+function craftRecipeAtAlchemist(recipeKey) {
+  if (!state) return false;
+  normalizeState(state);
+  const rk = String(recipeKey || "").trim();
+  const recipe = ALCHEMIST_RECIPES.find((r) => r.key === rk);
+  if (!recipe) return false;
+  if (!canCraftRecipe(state, recipe)) {
+    appendLog("You lack the materials (or gold)." );
+    render();
+    return false;
+  }
+
+  const goldNeed = Math.max(0, Math.floor(recipe.gold || 0));
+  if (goldNeed > 0 && !spendGold(goldNeed)) {
+    render();
+    return false;
+  }
+  for (const [k, v] of Object.entries(recipe.req || {})) {
+    const need = Math.max(0, Math.floor(v || 0));
+    if (need <= 0) continue;
+    consumeInvItem(state, k, need);
+  }
+  addInvItem(state, recipe.out, Math.max(1, Math.floor(recipe.outQty || 1)));
+  appendLog(`🧪 Crafted: ${itemLabel(recipe.out)}.`);
+  autoSave();
+  render();
+  return true;
+}
+
+function craftRecipeAtEnchanter(recipeKey) {
+  if (!state) return false;
+  normalizeState(state);
+  const rk = String(recipeKey || "").trim();
+  const recipe = ENCHANTER_RECIPES.find((r) => r.key === rk);
+  if (!recipe) return false;
+  if (!canCraftRecipe(state, recipe)) {
+    appendLog("You lack the materials (or gold)." );
+    render();
+    return false;
+  }
+
+  const goldNeed = Math.max(0, Math.floor(recipe.gold || 0));
+  if (goldNeed > 0 && !spendGold(goldNeed)) {
+    render();
+    return false;
+  }
+  for (const [k, v] of Object.entries(recipe.req || {})) {
+    const need = Math.max(0, Math.floor(v || 0));
+    if (need <= 0) continue;
+    consumeInvItem(state, k, need);
+  }
+  addInvItem(state, recipe.out, Math.max(1, Math.floor(recipe.outQty || 1)));
+  appendLog(`✨ Crafted: ${itemLabel(recipe.out)}.`);
+  autoSave();
+  render();
+  return true;
+}
+
+function craftRecipeAtCrafter(recipeKey) {
+  if (!state) return false;
+  normalizeState(state);
+  const rk = String(recipeKey || "").trim();
+  const recipe = CRAFTER_RECIPES.find((r) => r.key === rk);
+  if (!recipe) return false;
+  if (!canCraftRecipe(state, recipe)) {
+    appendLog("You lack the materials (or gold)." );
+    render();
+    return false;
+  }
+
+  const goldNeed = Math.max(0, Math.floor(recipe.gold || 0));
+  if (goldNeed > 0 && !spendGold(goldNeed)) {
+    render();
+    return false;
+  }
+  for (const [k, v] of Object.entries(recipe.req || {})) {
+    const need = Math.max(0, Math.floor(v || 0));
+    if (need <= 0) continue;
+    consumeInvItem(state, k, need);
+  }
+  addInvItem(state, recipe.out, Math.max(1, Math.floor(recipe.outQty || 1)));
+  appendLog(`🧵 Crafted: ${itemLabel(recipe.out)}.`);
+  autoSave();
+  render();
+  return true;
+}
+
 let itemModalEl = null;
 let itemModalTitleEl = null;
 let itemModalBodyEl = null;
@@ -905,6 +1091,7 @@ let itemModalEquipBtn = null;
 let itemModalUnequipBtn = null;
 let itemModalMode = null;
 let itemModalKey = null;
+let itemModalTargetBtns = [];
 
 let advModalEl = null;
 let advModalTitleEl = null;
@@ -914,27 +1101,15 @@ function ensureItemModal() {
   if (itemModalEl) return;
 
   itemModalEl = document.createElement("div");
-  itemModalEl.style.position = "fixed";
-  itemModalEl.style.inset = "0";
-  itemModalEl.style.background = "rgba(0,0,0,0.6)";
+  itemModalEl.className = "modalOverlay";
   itemModalEl.style.display = "none";
-  itemModalEl.style.alignItems = "center";
-  itemModalEl.style.justifyContent = "center";
-  itemModalEl.style.zIndex = "2000";
 
   const card = document.createElement("div");
-  card.style.width = "min(520px, calc(100vw - 28px))";
-  card.style.background = "#121a24";
-  card.style.border = "1px solid #203044";
-  card.style.borderRadius = "14px";
-  card.style.padding = "14px";
-  card.style.boxShadow = "0 0 18px rgba(0,0,0,0.35)";
+  card.className = "modalCard";
+  card.style.width = "min(560px, calc(100vw - 28px))";
 
   const top = document.createElement("div");
-  top.style.display = "flex";
-  top.style.justifyContent = "space-between";
-  top.style.gap = "10px";
-  top.style.alignItems = "center";
+  top.className = "modalHeader";
 
   itemModalTitleEl = document.createElement("div");
   itemModalTitleEl.className = "panelTitle";
@@ -949,15 +1124,13 @@ function ensureItemModal() {
   top.appendChild(btnClose);
 
   itemModalBodyEl = document.createElement("div");
-  itemModalBodyEl.className = "hint";
+  itemModalBodyEl.className = "modalBody";
 
   card.appendChild(top);
   card.appendChild(itemModalBodyEl);
 
   itemModalFooterEl = document.createElement("div");
-  itemModalFooterEl.className = "row";
-  itemModalFooterEl.style.justifyContent = "flex-end";
-  itemModalFooterEl.style.marginTop = "12px";
+  itemModalFooterEl.className = "modalFooter";
   itemModalFooterEl.style.display = "none";
 
   itemModalBuyBtn = document.createElement("button");
@@ -1072,6 +1245,7 @@ function openItemModal(itemKey) {
   itemModalMode = null;
   itemModalKey = k;
   updateItemModal();
+  if (itemModalEl) itemModalEl.classList.add("open");
   if (itemModalEl) itemModalEl.style.display = "flex";
 }
 
@@ -1080,6 +1254,7 @@ function openMarketItemModal(itemKey) {
   itemModalMode = "market";
   itemModalKey = String(itemKey || "").trim();
   updateItemModal();
+  if (itemModalEl) itemModalEl.classList.add("open");
   if (itemModalEl) itemModalEl.style.display = "flex";
 }
 
@@ -1151,13 +1326,71 @@ function updateItemModal() {
   if (itemModalUseBtn) {
     if (itemModalMode !== "market" && state) {
       const owned = ownedNow;
-      itemModalUseBtn.style.display = (owned > 0) ? "inline-block" : "none";
-      itemModalUseBtn.disabled = !(owned > 0);
-      itemModalUseBtn.textContent = `Use (${owned})`;
+      const kk = String(k || "").trim().toLowerCase();
+      const isPhoenixFeather = kk === "phoenix_feather";
+      const inCombat = !!state?.world?.pendingEvent && state.world.pendingEvent.kind === "combat" && state.world.pendingEvent.stage === "combat";
+      if (isPhoenixFeather) {
+        itemModalUseBtn.style.display = "none";
+        itemModalUseBtn.disabled = true;
+        itemModalUseBtn.textContent = "Use";
+      } else {
+        itemModalUseBtn.style.display = (owned > 0) ? "inline-block" : "none";
+        itemModalUseBtn.disabled = !(owned > 0);
+        itemModalUseBtn.textContent = `Use (${owned})`;
+      }
     } else {
       itemModalUseBtn.style.display = "none";
       itemModalUseBtn.disabled = true;
       itemModalUseBtn.textContent = "Use";
+    }
+  }
+
+  if (itemModalFooterEl) {
+    if (Array.isArray(itemModalTargetBtns) && itemModalTargetBtns.length) {
+      for (const b of itemModalTargetBtns) {
+        if (b && b.parentNode) b.parentNode.removeChild(b);
+      }
+    }
+    itemModalTargetBtns = [];
+
+    const kk = String(k || "").trim().toLowerCase();
+    const targetable = def.consumable && (
+      kk.startsWith("consumable_") ||
+      kk === "bandage" ||
+      kk === "health_potion" ||
+      kk === "mana_potion" ||
+      kk === "phoenix_feather" ||
+      kk === "tonic" ||
+      kk === "elixir" ||
+      kk === "ration" ||
+      kk === "phoenix_draught" ||
+      kk === "titanblood_elixir" ||
+      kk === "sunfire_serum" ||
+      kk === "aether_salve" ||
+      kk === "ironbark_poultice"
+    );
+
+    const inCombat = !!state?.world?.pendingEvent && state.world.pendingEvent.kind === "combat" && state.world.pendingEvent.stage === "combat";
+    let members = (itemModalMode !== "market" && targetable && state && ownedNow > 0)
+      ? (Array.isArray(state.party?.members) ? state.party.members : [])
+      : [];
+    if (kk === "phoenix_feather") {
+      members = inCombat ? members.filter((m) => m && m.id && (m.hp || 0) <= 0) : [];
+    }
+
+    for (const m of members) {
+      if (!m || !m.id) continue;
+      const btn = document.createElement("button");
+      btn.className = "secondary";
+      btn.textContent = `Use on ${m.name || "Companion"}`;
+      btn.addEventListener("click", () => {
+        if (!state) return;
+        normalizeState(state);
+        useStoryItem(k, m.id);
+        updateItemModal();
+      });
+      itemModalFooterEl.appendChild(btn);
+      itemModalTargetBtns.push(btn);
     }
   }
 
@@ -1185,6 +1418,7 @@ function updateItemModal() {
 }
 
 function closeItemModal() {
+  if (itemModalEl) itemModalEl.classList.remove("open");
   if (itemModalEl) itemModalEl.style.display = "none";
   itemModalMode = null;
   itemModalKey = null;
@@ -1195,33 +1429,13 @@ function ensureAdvModal() {
 
   advModalEl = document.createElement("div");
   advModalEl.className = "modalOverlay";
-  advModalEl.style.position = "fixed";
-  advModalEl.style.inset = "0";
   advModalEl.style.display = "none";
-  advModalEl.style.alignItems = "center";
-  advModalEl.style.justifyContent = "center";
-  advModalEl.style.padding = "18px";
-  advModalEl.style.background = "rgba(0,0,0,0.6)";
-  advModalEl.style.zIndex = "2100";
 
   const card = document.createElement("div");
   card.className = "modalCard";
-  card.style.width = "min(720px, calc(100vw - 28px))";
-  card.style.background = "#121a24";
-  card.style.border = "1px solid #203044";
-  card.style.borderRadius = "16px";
-  card.style.boxShadow = "0 0 22px rgba(0,0,0,0.55)";
-  card.style.overflow = "hidden";
 
   const top = document.createElement("div");
   top.className = "modalHeader";
-  top.style.display = "flex";
-  top.style.justifyContent = "space-between";
-  top.style.gap = "10px";
-  top.style.alignItems = "center";
-  top.style.padding = "12px 14px";
-  top.style.background = "#0e1520";
-  top.style.borderBottom = "1px solid #203044";
 
   advModalTitleEl = document.createElement("div");
   advModalTitleEl.className = "panelTitle";
@@ -1237,9 +1451,6 @@ function ensureAdvModal() {
 
   advModalBodyEl = document.createElement("div");
   advModalBodyEl.className = "modalBody";
-  advModalBodyEl.style.padding = "12px 14px 14px";
-  advModalBodyEl.style.maxHeight = "min(72vh, 720px)";
-  advModalBodyEl.style.overflow = "auto";
 
   card.appendChild(top);
   card.appendChild(advModalBodyEl);
@@ -1518,7 +1729,7 @@ function effectBonusForStat(s, statKey) {
   return clamp(bonus, 0, 0.12);
 }
 
-function useItem(itemKey, ev) {
+function useItem(itemKey, ev, targetId) {
   if (!state) return false;
   normalizeState(state);
   const k = String(itemKey || "").trim();
@@ -1538,8 +1749,143 @@ function useItem(itemKey, ev) {
     else appendLog(line);
   };
 
+  const desiredTargetId = String(targetId || "").trim();
+  const targetIsCompanion = desiredTargetId && desiredTargetId !== "player";
+
   if (!consumeInvItem(state, k, 1)) {
     logLine("You don't have that item.");
+    if (inCombat) renderPendingEvent();
+    else render();
+    return false;
+  }
+
+  if (k === "phoenix_feather") {
+    if (!inCombat) {
+      addInvItem(state, k, 1);
+      logLine("You can only use that in battle.");
+      render();
+      return false;
+    }
+    if (!targetIsCompanion) {
+      addInvItem(state, k, 1);
+      logLine("You can only revive a fallen companion.");
+      renderPendingEvent();
+      return false;
+    }
+    const c = (typeof findPartyMemberById === "function") ? findPartyMemberById(state, desiredTargetId) : null;
+    if (!c) {
+      addInvItem(state, k, 1);
+      logLine("No such companion.");
+      renderPendingEvent();
+      return false;
+    }
+    if ((c.hp || 0) > 0) {
+      addInvItem(state, k, 1);
+      logLine("That companion is not down.");
+      renderPendingEvent();
+      return false;
+    }
+    const reviveHp = Math.max(1, Math.floor(c.maxHp || 1));
+    c.hp = reviveHp;
+    if ((c.maxMana || 0) > 0) c.mana = Math.max(0, Math.floor(c.maxMana || 0));
+    logLine(`🔥 You use a Phoenix Feather on ${c.name || "Companion"}. They rise again fully restored.`);
+    autoSave();
+    renderPendingEvent();
+    return true;
+  }
+
+  if (targetIsCompanion && typeof healPartyTarget === "function") {
+    const companion = (typeof findPartyMemberById === "function") ? findPartyMemberById(state, desiredTargetId) : null;
+    const targetName = companion?.name || "Companion";
+    const kk = k.toLowerCase();
+
+    const res = playerStat("resilience");
+    const arc = playerStat("arcana");
+
+    if (kk.startsWith("consumable_")) {
+      const m = /^consumable_(\d\d\d)$/i.exec(kk);
+      const n = m ? clamp(parseInt(m[1], 10), 1, 200) : (1 + (hashString(kk) % 200));
+      const ingredient = (n - 1) % 20;
+      const form = Math.floor((n - 1) / 20) % 10;
+      const roll01 = (salt) => ((hashString(`${kk}:${String(salt || "")}`) >>> 0) / 4294967295);
+
+      if (form === 0) {
+        const gain = Math.max(4, Math.floor(6 + arc * 0.7 + ingredient * 0.25 + roll01("mana") * 3));
+        const did = (typeof restoreManaPartyTarget === "function") ? restoreManaPartyTarget(desiredTargetId, gain) : 0;
+        logLine(`🧪 You use ${itemLabel(k)} on ${targetName} (+${did} mana).`);
+      } else if (form === 1) {
+        const heal = Math.max(1, Math.floor(2 + res * 0.25 + ingredient * 0.08 + roll01("heal") * 3));
+        const did = healPartyTarget(desiredTargetId, heal);
+        logLine(`🥃 You use ${itemLabel(k)} on ${targetName} (+${did} HP).`);
+      } else if (form === 2) {
+        const heal = Math.max(6, Math.floor(10 + res * 0.9 + ingredient * 0.35 + roll01("heal") * 6));
+        const gain = Math.max(4, Math.floor(7 + arc * 0.7 + ingredient * 0.25 + roll01("mana") * 5));
+        const didHp = healPartyTarget(desiredTargetId, heal);
+        const didMana = (typeof restoreManaPartyTarget === "function") ? restoreManaPartyTarget(desiredTargetId, gain) : 0;
+        logLine(`✨ You use ${itemLabel(k)} on ${targetName} (+${didHp} HP, +${didMana} mana).`);
+      } else if (form === 3 || form === 4) {
+        const heal = (form === 3)
+          ? Math.max(4, Math.floor(7 + res * 0.7 + ingredient * 0.28 + roll01("heal") * 5))
+          : Math.max(5, Math.floor(8 + res * 0.8 + ingredient * 0.30 + roll01("heal") * 5));
+        const did = healPartyTarget(desiredTargetId, heal);
+        logLine(`🧴 You use ${itemLabel(k)} on ${targetName} (+${did} HP).`);
+      } else if (form === 5) {
+        const gain = Math.max(2, Math.floor(3 + arc * 0.35 + ingredient * 0.12 + roll01("mana") * 3));
+        const did = (typeof restoreManaPartyTarget === "function") ? restoreManaPartyTarget(desiredTargetId, gain) : 0;
+        logLine(`🍵 You use ${itemLabel(k)} on ${targetName} (+${did} mana).`);
+      } else {
+        addInvItem(state, k, 1);
+        logLine("That item can't be used on a companion.");
+        if (inCombat) renderPendingEvent();
+        else render();
+        return false;
+      }
+
+      autoSave();
+      if (inCombat) renderPendingEvent();
+      else render();
+      return true;
+    }
+
+    if (kk === "bandage") {
+      const heal = 18 + res * 2;
+      const did = healPartyTarget(desiredTargetId, heal);
+      logLine(`🩹 You use a bandage on ${targetName} (+${did} HP).`);
+      autoSave();
+      if (inCombat) renderPendingEvent();
+      else render();
+      return true;
+    }
+    if (kk === "health_potion") {
+      const heal = 26 + res * 3;
+      const did = healPartyTarget(desiredTargetId, heal);
+      logLine(`🧪 You use a health potion on ${targetName} (+${did} HP).`);
+      autoSave();
+      if (inCombat) renderPendingEvent();
+      else render();
+      return true;
+    }
+    if (kk === "mana_potion") {
+      const gain = 18 + arc * 3;
+      const did = (typeof restoreManaPartyTarget === "function") ? restoreManaPartyTarget(desiredTargetId, gain) : 0;
+      logLine(`🟣 You use a mana potion on ${targetName} (+${did} mana).`);
+      autoSave();
+      if (inCombat) renderPendingEvent();
+      else render();
+      return true;
+    }
+    if (kk === "tonic") {
+      const gain = 12 + arc * 2;
+      const did = (typeof restoreManaPartyTarget === "function") ? restoreManaPartyTarget(desiredTargetId, gain) : 0;
+      logLine(`🔹 You use a mana tonic on ${targetName} (+${did} mana).`);
+      autoSave();
+      if (inCombat) renderPendingEvent();
+      else render();
+      return true;
+    }
+
+    addInvItem(state, k, 1);
+    logLine("That item can't be used on a companion.");
     if (inCombat) renderPendingEvent();
     else render();
     return false;
@@ -1717,15 +2063,18 @@ function useItem(itemKey, ev) {
     }
     logLine(`⚡ You drink a stamina draught. You feel faster.`);
   } else if (k === "antidote") {
+    const hadP = hasEffectOnState(state, "poisoned");
     const hadC = hasEffectOnState(state, "cursed");
+    clearEffect("poisoned");
     clearEffect("cursed");
-    logLine(hadC ? "🧴 You take an antidote. The foul feeling fades." : "🧴 You take an antidote." );
+    logLine((hadP || hadC) ? "🧴 You take an antidote. The sickness fades." : "🧴 You take an antidote." );
   } else if (k === "elixir") {
     const heal = Math.max(12, Math.floor(18 + res * 1.6));
     const gain = Math.max(10, Math.floor(14 + arc * 1.6));
     state.hp = Math.min(playerMaxHp(), (state.hp || 0) + heal);
     state.mana = Math.min(playerMaxMana(), (state.mana || 0) + gain);
     clearEffect("bleeding");
+    clearEffect("poisoned");
     clearEffect("cursed");
     addEffect("rested", 10000);
     logLine(`✨ You drink an elixir (+${heal} HP, +${gain} mana).`);
@@ -1806,7 +2155,7 @@ function useItem(itemKey, ev) {
   return false;
 }
 
-function useStoryItem(itemKey) {
+﻿function useStoryItem(itemKey, targetId) {
   if (!state) return false;
   normalizeState(state);
   const k = String(itemKey || "").trim();
@@ -1820,7 +2169,7 @@ function useStoryItem(itemKey) {
   }
 
   if (def.consumable) {
-    return useItem(k);
+    return useItem(k, null, targetId);
   }
 
   if (/^ore_/.test(k)) {
@@ -1829,6 +2178,84 @@ function useStoryItem(itemKey) {
     } else {
       appendLog("You need a blacksmith to work this ore. Find one at the Market.");
     }
+    render();
+    return true;
+  }
+
+  if (/^herb_/.test(k)) {
+    if ((state.nodeId || "") === "alchemist") {
+      appendLog("Talk to the alchemist and choose a recipe to brew something from herbs.");
+    } else {
+      appendLog("You need an alchemist to work these herbs. Find one at the Market.");
+    }
+    render();
+    return true;
+  }
+
+  if (k === "rune_shard" || k === "ember_gem") {
+    if ((state.nodeId || "") === "enchanter") {
+      appendLog("Talk to the enchanter and choose an inscription.");
+    } else {
+      appendLog("You need an enchanter to work this. Find one at the Market.");
+    }
+    render();
+    return true;
+  }
+
+  if (k === "cloth" || k === "leather" || k === "lumber") {
+    if ((state.nodeId || "") === "crafter") {
+      appendLog("Talk to the crafter and choose what to make.");
+    } else {
+      appendLog("You need a crafter to work these materials. Find one at the Market.");
+    }
+    render();
+    return true;
+  }
+
+  if (k === "sealed_letter") {
+    const stage = Math.max(0, Math.floor(state.arcs?.investigation?.stage || 0));
+    if (stage <= 0) appendLog("This letter looks important, but you have no lead yet.");
+    else if (stage === 1) appendLog("A lead will surface soon. Keep the letter close.");
+    else if (stage === 2) appendLog("A lead has surfaced. Go to Crossroads and follow it.");
+    else appendLog("The letter has served its purpose. Your next step is at Crossroads.");
+    render();
+    return true;
+  }
+
+  if (k === "ledger") {
+    const stage = Math.max(0, Math.floor(state.arcs?.investigation?.stage || 0));
+    if (stage === 3) appendLog("Deliver Findings at Crossroads.");
+    else appendLog("The ledger is evidence. Decide who to trust at Crossroads.");
+    render();
+    return true;
+  }
+
+  if (k === "lantern_cellar_key") {
+    appendLog("Return to Crossroads and choose 'Return to the Lantern Cellar'.");
+    render();
+    return true;
+  }
+
+  if (k === "sun_vault_key") {
+    appendLog("Return to Crossroads and choose 'Open the Sun Vault'.");
+    render();
+    return true;
+  }
+
+  if (k === "guild_seal") {
+    appendLog("Return to Crossroads and choose 'Present the Guild Seal'.");
+    render();
+    return true;
+  }
+
+  if (k === "crown_writ") {
+    appendLog("Return to Crossroads and choose 'Present the Crown Writ'.");
+    render();
+    return true;
+  }
+
+  if (k === "rebel_token") {
+    appendLog("Return to Crossroads and choose 'Present the Rebel Token'.");
     render();
     return true;
   }
@@ -1972,6 +2399,20 @@ function createLevelUpSkillDraft(s, level) {
   const buildKey = s?.character?.build || "balanced";
   const learned = s?.skills?.learned || {};
 
+  const usedBases = new Set();
+  const baseForKey = (k) => String(skillFamilyIdForKey(k) || "").trim();
+  const tierForKey = (k) => Math.max(1, Math.floor(skillTierForKey(k) || 1));
+
+  const bestTierByBase = new Map();
+  for (const kk of Object.keys(learned || {})) {
+    if (!learned[kk]) continue;
+    const base = baseForKey(kk);
+    if (!base) continue;
+    const t = tierForKey(kk);
+    const prev = bestTierByBase.get(base) || 0;
+    if (t > prev) bestTierByBase.set(base, t);
+  }
+
   const profDef = PROF_SKILL[String(profKey || "").toLowerCase()] || PROF_SKILL.fighter;
   const profFocuses = (Array.isArray(profDef.focuses) && profDef.focuses.length)
     ? profDef.focuses.map((x) => String(x || "").trim().toLowerCase()).filter(Boolean)
@@ -2004,20 +2445,40 @@ function createLevelUpSkillDraft(s, level) {
       guard += 1;
       continue;
     }
+    const base = baseForKey(key);
+    const candTier = tierForKey(key);
+    const learnedTier = base ? (bestTierByBase.get(base) || 0) : 0;
+    if (base && learnedTier >= candTier) {
+      guard += 1;
+      continue;
+    }
+    if (base && usedBases.has(base)) {
+      guard += 1;
+      continue;
+    }
     const def = skillDefFromParts(profKey, buildKey, idx);
     const score = focusScoreForDef(def) + (def.powerful ? 1 : 0);
     let accept = 25 + score * 20;
     if (guard > 1200) accept = 100;
     const roll = (x >>> 24) % 100;
-    if (roll < accept) options.push(key);
+    if (roll < accept) {
+      options.push(key);
+      if (base) usedBases.add(base);
+    }
     guard += 1;
   }
 
   while (options.length < 5) {
     const idx = ((options.length + 1) * 97) % SKILLS_PER_COMBO;
-    const key = skillKeyFor(profKey, buildKey, idx + 1);
-    if (!options.includes(key)) options.push(key);
-    else options.push(skillKeyFor(profKey, buildKey, ((idx + 13) % SKILLS_PER_COMBO) + 1));
+    const keyA = skillKeyFor(profKey, buildKey, idx + 1);
+    const keyB = skillKeyFor(profKey, buildKey, ((idx + 13) % SKILLS_PER_COMBO) + 1);
+    const baseA = baseForKey(keyA);
+    const tierA = tierForKey(keyA);
+    const okA = !options.includes(keyA) && (!baseA || (!usedBases.has(baseA) && (bestTierByBase.get(baseA) || 0) < tierA));
+    const pickKey = okA ? keyA : keyB;
+    const base = baseForKey(pickKey);
+    options.push(pickKey);
+    if (base) usedBases.add(base);
   }
 
   const countPrimary = () => options.filter((k) => String(skillDef(k)?.focus || "").toLowerCase() === String(profPrimary).toLowerCase()).length;
@@ -2041,13 +2502,30 @@ function createLevelUpSkillDraft(s, level) {
           tries += 1;
           continue;
         }
+        const candBase = baseForKey(candKey);
+        const candTier = tierForKey(candKey);
+        const learnedTier = candBase ? (bestTierByBase.get(candBase) || 0) : 0;
+        if (candBase && learnedTier >= candTier) {
+          tries += 1;
+          continue;
+        }
+        if (candBase && usedBases.has(candBase)) {
+          tries += 1;
+          continue;
+        }
         const candDef = skillDefFromParts(profKey, buildKey, idx);
         const f = String(candDef?.focus || "").toLowerCase();
         if (f !== String(profPrimary).toLowerCase()) {
           tries += 1;
           continue;
         }
-        options[options.indexOf(scored[rep].k)] = candKey;
+        const repIdx = options.indexOf(scored[rep].k);
+        if (repIdx >= 0) {
+          const oldBase = baseForKey(options[repIdx]);
+          if (oldBase) usedBases.delete(oldBase);
+          options[repIdx] = candKey;
+          if (candBase) usedBases.add(candBase);
+        }
         break;
       }
       rep += 1;
@@ -2097,10 +2575,24 @@ function chooseLevelUpDraftSkill(skillKey) {
   if (d.picksLeft <= 0) return;
   if (state.skills?.learned?.[k]) return;
 
-  state.skills.learned[k] = 1;
   const def = skillDef(k);
   state.skills.sources = (state.skills.sources && typeof state.skills.sources === "object") ? state.skills.sources : {};
-  if (!state.skills.sources[k]) state.skills.sources[k] = skillSourceForKey(state, k, def);
+  const src = state.skills.sources[k] || skillSourceForKey(state, k, def);
+
+  let ok = true;
+  if (typeof replaceLearnedSkillByBaseLabel === "function") {
+    ok = replaceLearnedSkillByBaseLabel(state, k, 1, src);
+  } else {
+    state.skills.learned[k] = 1;
+    if (!state.skills.sources[k]) state.skills.sources[k] = src;
+  }
+  if (!ok) {
+    appendLog("You already know a stronger version of that skill.");
+    autoSave();
+    renderLevelUpDraft();
+    return;
+  }
+
   playChirp([600, 900, 1200], 200, "triangle", 0.06, 0);
   appendLog(`✨ New skill learned: ${def.label}.`);
 
@@ -2281,6 +2773,7 @@ function skillDefFromParts(prof, build, index) {
   const tier = 1 + Math.floor((i - 1) / SKILLS_PER_TIER);
 
   const baseIndex = ((i - 1) % SKILLS_PER_TIER) + 1;
+
   const powerful = isPowerSkill(prof, build, baseIndex);
 
   const a = pick(b.styles, baseIndex + 3);
@@ -2288,11 +2781,11 @@ function skillDefFromParts(prof, build, index) {
   const form = pick(p.forms, baseIndex + 11);
   const accent = pick(b.accents, baseIndex + 13);
 
-  const focus = skillFocusFor(prof, build, i);
+  const focus = skillFocusFor(prof, build, baseIndex);
   const focusLabel = titleCaseWord(focus);
   const label = powerful
-    ? `${pick(POWER_SKILL_WORDS.prefixes, i + tier * 5)} ${pillar} ${pick(POWER_SKILL_WORDS.suffixes, i + tier * 9)}`
-    : `${a} ${pillar} ${form} ${roman(tier)}`;
+    ? `${pick(POWER_SKILL_WORDS.prefixes, baseIndex + 5)} ${accent} ${pillar} ${pick(POWER_SKILL_WORDS.suffixes, baseIndex + 9)}`
+    : `${a} ${accent} ${pillar} ${form} ${roman(tier)}`;
 
   const profLower = String(prof || "").toLowerCase();
   let noun = "technique";
@@ -2320,13 +2813,6 @@ This discipline is recorded in the ${accent} tradition — practiced until it be
   };
 }
 
-function skillTierForKey(skillKey) {
-  const parsed = parseSkillKey(skillKey);
-  if (!parsed) return 1;
-  const i = Math.max(1, Math.floor(parsed.index || 1));
-  return 1 + Math.floor((i - 1) / SKILLS_PER_TIER);
-}
-
 function skillDef(skillKey) {
   const parsed = parseSkillKey(skillKey);
   if (!parsed) {
@@ -2334,6 +2820,145 @@ function skillDef(skillKey) {
     return { key: k || "(unknown)", label: k || "(unknown)", desc: "No details available.", profession: "unknown", build: "unknown", focus: "balanced", tier: 1 };
   }
   return skillDefFromParts(parsed.profession, parsed.build, parsed.index);
+}
+
+function skillTierForKey(skillKey) {
+  const parsed = parseSkillKey(skillKey);
+  if (!parsed) return 1;
+  const i = Math.max(1, Math.floor(parsed.index || 1));
+  return 1 + Math.floor((i - 1) / SKILLS_PER_TIER);
+}
+
+function skillFamilyIdForKey(skillKey) {
+  const parsed = parseSkillKey(skillKey);
+  if (!parsed) return String(skillKey || "").trim();
+  const i = Math.max(1, Math.floor(parsed.index || 1));
+  const baseIndex = ((i - 1) % SKILLS_PER_TIER) + 1;
+  return `${parsed.profession}:${parsed.build}:${baseIndex}`;
+}
+
+function skillBaseLabel(def) {
+  const label = String(def?.label || "").trim();
+  if (!label) return "";
+  if (def?.powerful) return label;
+  return label.replace(/\s+[IVX]+$/i, "").trim();
+}
+
+function skillBaseLabelForKey(skillKey) {
+  const def = skillDef(skillKey);
+  return skillBaseLabel(def);
+}
+
+function dedupeLearnedSkillsByBaseLabel(s) {
+  if (!s) return false;
+  s.skills = s.skills || {};
+  s.skills.learned = s.skills.learned || {};
+  if (!s.skills.sources || typeof s.skills.sources !== "object") s.skills.sources = {};
+  const learned = s.skills.learned;
+  const sources = s.skills.sources;
+  const keys = Object.keys(learned).filter((k) => !!learned[k]);
+  if (keys.length <= 1) return false;
+
+  const tierFor = (k) => Math.max(1, Math.floor(skillTierForKey(k) || 1));
+  const rankFor = (k) => Math.max(1, Math.floor(learned[k] || 1));
+  const betterKey = (a, b) => {
+    if (!a) return b;
+    if (!b) return a;
+    const ta = tierFor(a);
+    const tb = tierFor(b);
+    if (ta !== tb) return ta > tb ? a : b;
+    const ra = rankFor(a);
+    const rb = rankFor(b);
+    if (ra !== rb) return ra > rb ? a : b;
+    return a;
+  };
+
+  const keepByBase = new Map();
+  for (const k of keys) {
+    const fam = String(skillFamilyIdForKey(k) || "").trim();
+    const lbl = String(skillBaseLabelForKey(k) || "").trim();
+    if (fam) keepByBase.set(`fam:${fam}`, betterKey(keepByBase.get(`fam:${fam}`), k));
+    if (lbl) keepByBase.set(`lbl:${lbl}`, betterKey(keepByBase.get(`lbl:${lbl}`), k));
+  }
+
+  let changed = false;
+  for (const k of keys) {
+    const fam = String(skillFamilyIdForKey(k) || "").trim();
+    const lbl = String(skillBaseLabelForKey(k) || "").trim();
+    const keepFam = fam ? keepByBase.get(`fam:${fam}`) : k;
+    const keepLbl = lbl ? keepByBase.get(`lbl:${lbl}`) : k;
+    const keep = betterKey(keepFam, keepLbl);
+    if (keep !== k) {
+      delete learned[k];
+      delete sources[k];
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+function replaceLearnedSkillByBaseLabel(s, newSkillKey, rank, source) {
+  if (!s) return false;
+  const k = String(newSkillKey || "").trim();
+  if (!k) return false;
+  s.skills = s.skills || {};
+  s.skills.learned = s.skills.learned || {};
+  if (!s.skills.sources || typeof s.skills.sources !== "object") s.skills.sources = {};
+
+  const learned = s.skills.learned;
+  const sources = s.skills.sources;
+  const base = String(skillFamilyIdForKey(k) || "").trim();
+  const lblBase = String(skillBaseLabelForKey(k) || "").trim();
+  const newTier = Math.max(1, Math.floor(skillTierForKey(k) || 1));
+
+  let bestTier = 0;
+  for (const kk of Object.keys(learned)) {
+    if (!learned[kk]) continue;
+    const fam = String(skillFamilyIdForKey(kk) || "").trim();
+    const lbl = String(skillBaseLabelForKey(kk) || "").trim();
+    const isSame = (base && fam === base) || (lblBase && lbl === lblBase);
+    if (!isSame) continue;
+    bestTier = Math.max(bestTier, Math.max(1, Math.floor(skillTierForKey(kk) || 1)));
+  }
+
+  if ((base || lblBase) && bestTier >= newTier) return false;
+
+  for (const kk of Object.keys(learned)) {
+    if (!learned[kk]) continue;
+    const fam = String(skillFamilyIdForKey(kk) || "").trim();
+    const lbl = String(skillBaseLabelForKey(kk) || "").trim();
+    const isSame = (base && fam === base) || (lblBase && lbl === lblBase);
+    if (!isSame) continue;
+    delete learned[kk];
+    delete sources[kk];
+  }
+
+  learned[k] = Math.max(1, Math.floor(rank || 1));
+  if (source && !sources[k]) sources[k] = source;
+  return true;
+}
+
+function canLearnSkillByBaseLabel(s, newSkillKey) {
+  if (!s) return false;
+  const k = String(newSkillKey || "").trim();
+  if (!k) return false;
+  const base = String(skillFamilyIdForKey(k) || "").trim();
+  const lblBase = String(skillBaseLabelForKey(k) || "").trim();
+  const newTier = Math.max(1, Math.floor(skillTierForKey(k) || 1));
+
+  if (!base && !lblBase) return true;
+
+  const learned = s.skills?.learned || {};
+  let bestTier = 0;
+  for (const kk of Object.keys(learned)) {
+    if (!learned[kk]) continue;
+    const fam = String(skillFamilyIdForKey(kk) || "").trim();
+    const lbl = String(skillBaseLabelForKey(kk) || "").trim();
+    const isSame = (base && fam === base) || (lblBase && lbl === lblBase);
+    if (!isSame) continue;
+    bestTier = Math.max(bestTier, Math.max(1, Math.floor(skillTierForKey(kk) || 1)));
+  }
+  return bestTier < newTier;
 }
 
 function skillPointCost(def) {
@@ -2518,27 +3143,15 @@ function ensureSkillModal() {
   if (skillModalEl) return;
 
   skillModalEl = document.createElement("div");
-  skillModalEl.style.position = "fixed";
-  skillModalEl.style.inset = "0";
-  skillModalEl.style.background = "rgba(0,0,0,0.6)";
   skillModalEl.style.display = "none";
-  skillModalEl.style.alignItems = "center";
-  skillModalEl.style.justifyContent = "center";
-  skillModalEl.style.zIndex = "2000";
+  skillModalEl.className = "modalOverlay";
 
   const card = document.createElement("div");
+  card.className = "modalCard";
   card.style.width = "min(560px, calc(100vw - 28px))";
-  card.style.background = "#121a24";
-  card.style.border = "1px solid #203044";
-  card.style.borderRadius = "14px";
-  card.style.padding = "14px";
-  card.style.boxShadow = "0 0 18px rgba(0,0,0,0.35)";
 
   const top = document.createElement("div");
-  top.style.display = "flex";
-  top.style.justifyContent = "space-between";
-  top.style.gap = "10px";
-  top.style.alignItems = "center";
+  top.className = "modalHeader";
 
   skillModalTitleEl = document.createElement("div");
   skillModalTitleEl.className = "panelTitle";
@@ -2553,7 +3166,7 @@ function ensureSkillModal() {
   top.appendChild(btnClose);
 
   skillModalBodyEl = document.createElement("div");
-  skillModalBodyEl.className = "hint";
+  skillModalBodyEl.className = "modalBody";
 
   card.appendChild(top);
   card.appendChild(skillModalBodyEl);
@@ -2580,10 +3193,12 @@ function openSkillModal(skillKey) {
     skillModalBodyEl.textContent = `Class: ${pLabel} / ${bLabel}\nRarity: ${rarity}\nFocus: ${titleCaseWord(def.focus)}\nTier: ${def.tier}\nCost: ${cost} Skill Points\nKey: ${def.key}\n\nWhat it does:\n${effect}\n\nLore:\n${def.desc || "No details available."}`;
     skillModalBodyEl.style.whiteSpace = "pre-wrap";
   }
+  if (skillModalEl) skillModalEl.classList.add("open");
   if (skillModalEl) skillModalEl.style.display = "flex";
 }
 
 function closeSkillModal() {
+  if (skillModalEl) skillModalEl.classList.remove("open");
   if (skillModalEl) skillModalEl.style.display = "none";
 }
 
@@ -2804,11 +3419,11 @@ function grantStarterSkillKitIfNeeded(s) {
 }
 
 const DIFFICULTY = {
-  easy: { label: "Easy", className: "easy", recLevel: 1, baseXp: 25, baseGold: 8, baseDmg: 6 },
-  normal: { label: "Normal", className: "normal", recLevel: 4, baseXp: 40, baseGold: 14, baseDmg: 10 },
-  hard: { label: "Hard", className: "hard", recLevel: 8, baseXp: 65, baseGold: 22, baseDmg: 16 },
-  elite: { label: "Elite", className: "elite", recLevel: 12, baseXp: 90, baseGold: 32, baseDmg: 24 },
-  legendary: { label: "Legendary", className: "legendary", recLevel: 16, baseXp: 130, baseGold: 48, baseDmg: 36 },
+  easy: { label: "Easy", className: "easy", recLevel: 1, baseXp: 35, baseGold: 10, xpPerLevel: 22, goldPerLevel: 4, baseDmg: 6 },
+  normal: { label: "Normal", className: "normal", recLevel: 4, baseXp: 70, baseGold: 20, xpPerLevel: 35, goldPerLevel: 7, baseDmg: 10 },
+  hard: { label: "Hard", className: "hard", recLevel: 8, baseXp: 120, baseGold: 32, xpPerLevel: 55, goldPerLevel: 12, baseDmg: 16 },
+  elite: { label: "Elite", className: "elite", recLevel: 12, baseXp: 180, baseGold: 48, xpPerLevel: 80, goldPerLevel: 18, baseDmg: 24 },
+  legendary: { label: "Legendary", className: "legendary", recLevel: 16, baseXp: 260, baseGold: 70, xpPerLevel: 115, goldPerLevel: 28, baseDmg: 36 },
 };
 
 const FACTIONS = ["Guild", "Rebels", "Crown", "Wilds"];
@@ -2930,6 +3545,22 @@ function verifyAdminPassword() {
 
 function renderAdminTools() {
   if (!adminToolsEl) return;
+  const prevActive = document.activeElement;
+  const prevFocusId = (prevActive && prevActive.id) ? String(prevActive.id) : "";
+  const prevSelStart = (prevActive && typeof prevActive.selectionStart === "number") ? prevActive.selectionStart : null;
+  const prevSelEnd = (prevActive && typeof prevActive.selectionEnd === "number") ? prevActive.selectionEnd : null;
+  const scheduleRestoreFocus = () => {
+    if (!prevFocusId) return;
+    const restore = () => {
+      const el = document.getElementById(prevFocusId);
+      if (!el || typeof el.focus !== "function") return;
+      el.focus();
+      if (prevSelStart !== null && prevSelEnd !== null && typeof el.setSelectionRange === "function") {
+        try { el.setSelectionRange(prevSelStart, prevSelEnd); } catch (_) {}
+      }
+    };
+    setTimeout(restore, 0);
+  };
   adminToolsEl.innerHTML = "";
 
   const title = document.createElement("div");
@@ -2942,11 +3573,63 @@ function renderAdminTools() {
     hint.className = "hint";
     hint.textContent = "Log in as admin# with the admin password to unlock admin tools.";
     adminToolsEl.appendChild(hint);
+    scheduleRestoreFocus();
     return;
   }
 
+  const buildHref = document.querySelector('link[href*="style.css"]')?.getAttribute("href") || "";
+  const buildMatch = /[?&]v=([^&]+)/.exec(buildHref);
+  const buildV = buildMatch ? buildMatch[1] : "dev";
+
+  const changesWrap = document.createElement("div");
+  changesWrap.className = "advSection";
+  changesWrap.style.marginTop = "0";
+  const changesTitle = document.createElement("div");
+  changesTitle.className = "advSectionTitle";
+  changesTitle.textContent = `Recent changes (Build ${buildV})`;
+  const changesBody = document.createElement("div");
+  changesBody.className = "advWrap";
+  changesBody.textContent =
+`- Skill families: duplicates cleaned up and only higher-tier upgrades offered.
+- Skill Lv cap: upgrades stop at Lv 7; wait for higher-tier versions.
+- Skill power scaling: Lv 1..7 now meaningfully scales damage/heal effectiveness.
+- Targeted items: HP/Mana recovery can be used on party members (incl. in combat).
+- Companions: improved stat scaling and auto-use of recovery items at low HP/mana.
+- Legendary revive: Phoenix Feather (very expensive) revives a dead teammate to full HP/mana and only appears when someone is down.
+- UI: build badge + sanity check helper (vireliaSanityCheck()).`;
+
+  const changesBtns = document.createElement("div");
+  changesBtns.className = "row";
+  changesBtns.style.marginTop = "10px";
+  const btnSanity = document.createElement("button");
+  btnSanity.className = "secondary";
+  btnSanity.textContent = "Run sanity check";
+  btnSanity.addEventListener("click", () => {
+    if (typeof window.vireliaSanityCheck === "function") {
+      const res = window.vireliaSanityCheck();
+      setHomeMsg(`Sanity check ran (see console). Build ${res?.build || buildV}.`);
+    } else {
+      setHomeMsg("Sanity check not available in this build.");
+    }
+  });
+  changesBtns.appendChild(btnSanity);
+
+  changesWrap.appendChild(changesTitle);
+  changesWrap.appendChild(changesBody);
+  changesWrap.appendChild(changesBtns);
+  adminToolsEl.appendChild(changesWrap);
+
   const known = knownItemKeys();
   const expanded = adminToolsEl.dataset.knownItemsExpanded === "1";
+  const knownQuery = String(adminToolsEl.dataset.knownItemsQuery || "");
+  const knownQueryLower = String(knownQuery || "").trim().toLowerCase();
+  const knownFiltered = knownQueryLower
+    ? known.filter((k) => {
+      const kk = String(k || "").toLowerCase();
+      const lbl = String(itemLabel(k) || "").toLowerCase();
+      return kk.includes(knownQueryLower) || lbl.includes(knownQueryLower);
+    })
+    : known;
 
   const knownWrap = document.createElement("div");
   knownWrap.className = "hint";
@@ -2959,7 +3642,19 @@ function renderAdminTools() {
   const knownLabel = document.createElement("div");
   knownLabel.className = "hint";
   knownLabel.style.marginTop = "0";
-  knownLabel.textContent = `Known items: ${known.length}`;
+  knownLabel.textContent = knownQueryLower ? `Known items: ${knownFiltered.length}/${known.length}` : `Known items: ${known.length}`;
+
+  const knownSearch = document.createElement("input");
+  knownSearch.id = "adminKnownSearch";
+  knownSearch.placeholder = "Search items (name or key)";
+  knownSearch.value = knownQuery;
+  knownSearch.style.width = "240px";
+  knownSearch.addEventListener("input", () => {
+    adminToolsEl.dataset.knownItemsQuery = String(knownSearch.value || "");
+    const q = String(knownSearch.value || "").trim();
+    if (q) adminToolsEl.dataset.knownItemsExpanded = "1";
+    renderAdminTools();
+  });
 
   const btnToggleKnown = document.createElement("button");
   btnToggleKnown.className = "secondary";
@@ -2976,7 +3671,7 @@ function renderAdminTools() {
     none.textContent = "(none)";
     list.appendChild(none);
   } else {
-    for (const k of known) {
+    for (const k of knownFiltered) {
       const row = document.createElement("div");
       row.className = "adminItemRow";
       row.textContent = `${itemLabel(k)} (${k})`;
@@ -2992,6 +3687,7 @@ function renderAdminTools() {
   });
 
   knownTop.appendChild(knownLabel);
+  knownTop.appendChild(knownSearch);
   knownTop.appendChild(btnToggleKnown);
   knownWrap.appendChild(knownTop);
   knownWrap.appendChild(list);
@@ -3023,11 +3719,15 @@ function renderAdminTools() {
   hint.textContent = "Click Edit on a save above to modify it.";
   adminToolsEl.appendChild(hint);
 
-  if (!adminEditingProfile) return;
+  if (!adminEditingProfile) {
+    scheduleRestoreFocus();
+    return;
+  }
 
   const loaded = safeLoad(adminEditingProfile);
   if (!loaded) {
     adminEditingProfile = null;
+    scheduleRestoreFocus();
     return;
   }
   normalizeState(loaded);
@@ -3087,11 +3787,6 @@ function renderAdminTools() {
   invRow.style.alignItems = "center";
 
   const invKeySel = document.createElement("select");
-  invKeySel.style.padding = "10px 12px";
-  invKeySel.style.borderRadius = "12px";
-  invKeySel.style.border = "1px solid #2b3c55";
-  invKeySel.style.background = "#0e1520";
-  invKeySel.style.color = "#e9eef7";
   for (const k of known) {
     const opt = document.createElement("option");
     opt.value = k;
@@ -3100,12 +3795,37 @@ function renderAdminTools() {
   }
 
   const invKeyCustom = document.createElement("input");
+  invKeyCustom.id = "adminInvKeyCustom";
   invKeyCustom.placeholder = "or type item key";
   invKeyCustom.style.width = "180px";
+  invKeyCustom.value = String(adminToolsEl.dataset.adminInvKeyCustom || "");
+  invKeyCustom.addEventListener("input", () => {
+    adminToolsEl.dataset.adminInvKeyCustom = String(invKeyCustom.value || "");
+  });
+
+  const itemKeyListId = "adminItemKeyList";
+  let itemKeyList = document.getElementById(itemKeyListId);
+  if (!itemKeyList) {
+    itemKeyList = document.createElement("datalist");
+    itemKeyList.id = itemKeyListId;
+    document.body.appendChild(itemKeyList);
+  }
+  itemKeyList.innerHTML = "";
+  for (const k of known) {
+    const opt = document.createElement("option");
+    opt.value = k;
+    opt.textContent = itemLabel(k);
+    itemKeyList.appendChild(opt);
+  }
+  invKeyCustom.setAttribute("list", itemKeyListId);
 
   const invQty = document.createElement("input");
-  invQty.value = "1";
+  invQty.id = "adminInvQty";
+  invQty.value = String(adminToolsEl.dataset.adminInvQty || "1");
   invQty.style.width = "96px";
+  invQty.addEventListener("input", () => {
+    adminToolsEl.dataset.adminInvQty = String(invQty.value || "");
+  });
 
   const getInvKey = () => {
     const typed = String(invKeyCustom.value || "").trim();
@@ -3143,6 +3863,25 @@ function renderAdminTools() {
   btnTake.textContent = "Take";
   btnTake.addEventListener("click", () => giveItem(-1));
 
+  invKeyCustom.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    const key = getInvKey();
+    const keyValid = !!key && known.includes(key);
+    if (!keyValid) return;
+    e.preventDefault();
+    if (e.shiftKey) giveItem(-1);
+    else giveItem(1);
+  });
+  invQty.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    const key = getInvKey();
+    const keyValid = !!key && known.includes(key);
+    if (!keyValid) return;
+    e.preventDefault();
+    if (e.shiftKey) giveItem(-1);
+    else giveItem(1);
+  });
+
   invRow.appendChild(invKeySel);
   invRow.appendChild(invKeyCustom);
   invRow.appendChild(invQty);
@@ -3170,11 +3909,6 @@ function renderAdminTools() {
   skillWrap.appendChild(skillTitle);
 
   const profSel = document.createElement("select");
-  profSel.style.padding = "10px 12px";
-  profSel.style.borderRadius = "12px";
-  profSel.style.border = "1px solid #2b3c55";
-  profSel.style.background = "#0e1520";
-  profSel.style.color = "#e9eef7";
   for (const p of PROFESSIONS) {
     const opt = document.createElement("option");
     opt.value = p.key;
@@ -3183,11 +3917,6 @@ function renderAdminTools() {
   }
 
   const buildSel = document.createElement("select");
-  buildSel.style.padding = "10px 12px";
-  buildSel.style.borderRadius = "12px";
-  buildSel.style.border = "1px solid #2b3c55";
-  buildSel.style.background = "#0e1520";
-  buildSel.style.color = "#e9eef7";
   for (const b of BUILDS) {
     const opt = document.createElement("option");
     opt.value = b.key;
@@ -3196,8 +3925,35 @@ function renderAdminTools() {
   }
 
   const skillKeyCustom = document.createElement("input");
+  skillKeyCustom.id = "adminSkillKeyCustom";
   skillKeyCustom.placeholder = "or type skill key";
   skillKeyCustom.style.width = "220px";
+  skillKeyCustom.value = String(adminToolsEl.dataset.adminSkillKeyCustom || "");
+  skillKeyCustom.addEventListener("input", () => {
+    adminToolsEl.dataset.adminSkillKeyCustom = String(skillKeyCustom.value || "");
+  });
+
+  const skillKeyListId = "adminSkillKeyList";
+  let skillKeyList = document.getElementById(skillKeyListId);
+  if (!skillKeyList) {
+    skillKeyList = document.createElement("datalist");
+    skillKeyList.id = skillKeyListId;
+    document.body.appendChild(skillKeyList);
+  }
+  skillKeyList.innerHTML = "";
+  {
+    const p0 = String(profSel.value || "fighter").trim().toLowerCase() || "fighter";
+    const b0 = String(buildSel.value || "balanced").trim().toLowerCase() || "balanced";
+    for (let i = 1; i <= SKILLS_PER_COMBO; i++) {
+      const def = skillDefFromParts(p0, b0, i);
+      if (!def || !def.key) continue;
+      const opt = document.createElement("option");
+      opt.value = def.key;
+      opt.textContent = def.label;
+      skillKeyList.appendChild(opt);
+    }
+  }
+  skillKeyCustom.setAttribute("list", skillKeyListId);
 
   const btnPrevSkillPage = document.createElement("button");
   btnPrevSkillPage.className = "secondary";
@@ -3261,6 +4017,16 @@ function renderAdminTools() {
   btnTakeSkill.textContent = "Take Skill";
   btnTakeSkill.addEventListener("click", () => giveSkillKey(-1));
 
+  skillKeyCustom.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    const typed = String(skillKeyCustom.value || "").trim();
+    const keyValid = !!typed && !!parseSkillKey(typed);
+    if (!keyValid) return;
+    e.preventDefault();
+    if (e.shiftKey) giveSkillKey(-1);
+    else giveSkillKey(1);
+  });
+
   btnPrevSkillPage.addEventListener("click", () => {
     adminSkillPage = Math.max(0, adminSkillPage - 1);
     renderAdminTools();
@@ -3270,10 +4036,12 @@ function renderAdminTools() {
     renderAdminTools();
   });
   profSel.addEventListener("change", () => {
+    adminSkillProf = String(profSel.value || "fighter").trim();
     adminSkillPage = 0;
     renderAdminTools();
   });
   buildSel.addEventListener("change", () => {
+    adminSkillBuild = String(buildSel.value || "balanced").trim();
     adminSkillPage = 0;
     renderAdminTools();
   });
@@ -3374,7 +4142,6 @@ function renderAdminTools() {
   const flagsWrap = document.createElement("div");
   flagsWrap.style.display = "flex";
   flagsWrap.style.gap = "10px";
-  flagsWrap.style.flexWrap = "wrap";
 
   const heardWrap = document.createElement("label");
   heardWrap.className = "hint";
@@ -3399,11 +4166,6 @@ function renderAdminTools() {
   allegLabel.style.marginTop = "0";
   allegLabel.textContent = "Allegiance";
   const allegSel = document.createElement("select");
-  allegSel.style.padding = "10px 12px";
-  allegSel.style.borderRadius = "12px";
-  allegSel.style.border = "1px solid #2b3c55";
-  allegSel.style.background = "#0e1520";
-  allegSel.style.color = "#e9eef7";
   const allegOptions = ["None", ...FACTIONS];
   for (const o of allegOptions) {
     const opt = document.createElement("option");
@@ -3451,6 +4213,109 @@ function renderAdminTools() {
   fields.appendChild(cun.wrap);
   fields.appendChild(arc.wrap);
   fields.appendChild(res.wrap);
+
+  const xpWrap = document.createElement("div");
+  xpWrap.style.display = "flex";
+  xpWrap.style.flexDirection = "column";
+  xpWrap.style.gap = "10px";
+
+  const xpTitle = document.createElement("div");
+  xpTitle.className = "hint";
+  xpTitle.style.marginTop = "0";
+  const xpNeedNow = (typeof xpToNext === "function") ? xpToNext(loaded.level || 1) : ((loaded.level || 1) * 100);
+  xpTitle.textContent = `XP: ${loaded.xp || 0}/${xpNeedNow}`;
+  xpWrap.appendChild(xpTitle);
+
+  const xpRow = document.createElement("div");
+  xpRow.className = "row";
+  xpRow.style.marginTop = "0";
+  const xpAmt = document.createElement("input");
+  xpAmt.id = "adminGrantXp";
+  xpAmt.placeholder = "XP (+/-)";
+  xpAmt.style.width = "140px";
+  xpAmt.value = String(adminToolsEl.dataset.adminGrantXp || "100");
+  xpAmt.addEventListener("input", () => {
+    adminToolsEl.dataset.adminGrantXp = String(xpAmt.value || "");
+  });
+
+  const btnGiveXp = document.createElement("button");
+  btnGiveXp.textContent = "Apply XP";
+  btnGiveXp.addEventListener("click", () => {
+    try {
+      const n = parseInt(String(xpAmt.value || "0"), 10);
+      const delta = Number.isFinite(n) ? n : 0;
+      if (delta === 0) return;
+
+      loaded.level = Math.max(1, Math.floor(loaded.level || 1));
+      if (typeof loaded.xp !== "number" || !Number.isFinite(loaded.xp)) loaded.xp = 0;
+      loaded.xp = Math.floor(loaded.xp);
+      loaded.skills = loaded.skills || {};
+      loaded.skills.learned = loaded.skills.learned || {};
+
+      const xpNeed = (lvl) => (typeof xpToNext === "function") ? xpToNext(lvl) : (Math.max(1, Math.floor(lvl || 1)) * 100);
+      if (delta > 0) {
+        loaded.xp += delta;
+        while (loaded.xp >= xpNeed(loaded.level)) {
+          loaded.xp -= xpNeed(loaded.level);
+          loaded.level = Math.max(1, Math.floor((loaded.level || 1) + 1));
+          loaded.skillPoints = (loaded.skillPoints || 0) + 10;
+          loaded.maxHp = Math.max(1, Math.floor((loaded.maxHp || 1) + 6));
+          loaded.hp = Math.min(maxHpForState(loaded), Math.floor((loaded.hp || 0) + 6));
+          loaded.mana = Math.min(maxManaForState(loaded), Math.floor((loaded.mana || 0) + 4));
+          queueLevelUpDraftLevel(loaded, loaded.level);
+        }
+      } else {
+        let d = delta;
+        while (d < 0) {
+          if (loaded.xp + d >= 0) {
+            loaded.xp = Math.max(0, Math.floor(loaded.xp + d));
+            d = 0;
+            break;
+          }
+          if (loaded.level <= 1) {
+            loaded.level = 1;
+            loaded.xp = 0;
+            d = 0;
+            break;
+          }
+          d += loaded.xp;
+          loaded.level = Math.max(1, Math.floor((loaded.level || 1) - 1));
+          loaded.skillPoints = Math.max(0, Math.floor((loaded.skillPoints || 0) - 10));
+          loaded.maxHp = Math.max(1, Math.floor((loaded.maxHp || 1) - 6));
+          loaded.xp = Math.max(0, xpNeed(loaded.level) - 1);
+        }
+      }
+      if (typeof clampResourcesForState === "function") clampResourcesForState(loaded);
+
+      loaded.updatedAt = nowIso();
+      const saved = safeSave(adminEditingProfile, loaded);
+      if (!saved) {
+        setHomeMsg(`Failed to save XP change for ${adminEditingProfile}.`);
+        return;
+      }
+      if (state && state.profile === adminEditingProfile) {
+        state.level = loaded.level;
+        state.xp = loaded.xp;
+        state.skillPoints = loaded.skillPoints;
+        state.maxHp = loaded.maxHp;
+        state.hp = loaded.hp;
+        state.maxMana = loaded.maxMana;
+        state.mana = loaded.mana;
+        if (typeof normalizeState === "function") normalizeState(state);
+      }
+      renderHomeSaves();
+      renderAdminTools();
+      const amt = Math.abs(delta);
+      setHomeMsg(`${delta > 0 ? "Gave" : "Took"} ${amt} XP ${delta > 0 ? "to" : "from"} ${adminEditingProfile}.`);
+    } catch (e) {
+      try { console.error(e); } catch (_) {}
+      setHomeMsg(`XP change failed for ${adminEditingProfile}. See console.`);
+    }
+  });
+
+  xpRow.appendChild(xpAmt);
+  xpRow.appendChild(btnGiveXp);
+  xpWrap.appendChild(xpRow);
 
   const btnSaveUser = document.createElement("button");
   btnSaveUser.textContent = "Save Changes";
@@ -3505,21 +4370,30 @@ function renderAdminTools() {
   right.appendChild(btnSaveUser);
   right.appendChild(btnDeleteUser);
 
+  const exportBtn = document.createElement("button");
+  exportBtn.textContent = "Export JSON";
+  exportBtn.addEventListener("click", () => {
+    downloadJson(`${adminEditingProfile}.json`, loaded);
+  });
+
+  right.appendChild(exportBtn);
+
+  form.appendChild(left);
+  form.appendChild(right);
+
   const container = document.createElement("div");
   container.style.display = "flex";
   container.style.flexDirection = "column";
   container.style.gap = "10px";
-  container.appendChild(left);
+  container.appendChild(form);
+  container.appendChild(flagsWrap);
   container.appendChild(fields);
+  container.appendChild(xpWrap);
   container.appendChild(invWrap);
   container.appendChild(skillWrap);
-  container.appendChild(flagsWrap);
-
-  form.appendChild(container);
-  form.appendChild(right);
-  adminToolsEl.appendChild(form);
+  adminToolsEl.appendChild(container);
+  scheduleRestoreFocus();
 }
-
 const ADMIN_DELETED_FLAG = `virelia_admin_deleted:${ADMIN_PROFILE}`;
 const LEGACY_ADMIN_PROFILE = "admin@";
 const LEGACY_ADMIN_MIGRATED_FLAG = "virelia_admin_migrated_admin_at";
@@ -3735,13 +4609,124 @@ function xpToNext(level) {
   return level * 100;
 }
 
+function ensureCompanionStarterSkills(c) {
+  if (!c || !c.id) return;
+  c.skills = c.skills || {};
+  c.skills.learned = c.skills.learned || {};
+  c.skills.sources = (c.skills.sources && typeof c.skills.sources === "object") ? c.skills.sources : {};
+  c.flags = (c.flags && typeof c.flags === "object") ? c.flags : {};
+  if (c.flags.starterSkillKitGranted) return;
+
+  const prof = String(c.profession || "fighter").trim().toLowerCase() || "fighter";
+  const build = String(c.build || "balanced").trim().toLowerCase() || "balanced";
+  const learned = c.skills.learned;
+
+  const profDef = PROF_SKILL[prof] || PROF_SKILL.fighter;
+  const profFocuses = (Array.isArray(profDef.focuses) && profDef.focuses.length)
+    ? profDef.focuses.map((x) => String(x || "").trim().toLowerCase()).filter(Boolean)
+    : ["strength", "cunning", "arcana", "resilience"];
+  const profPrimary = profFocuses[0] || "strength";
+  const profSecondary = profFocuses.find((x) => String(x).toLowerCase() !== String(profPrimary).toLowerCase()) || profPrimary;
+  let buildFocus = buildFocusForBuild(build);
+  if (!buildFocus) buildFocus = profSecondary;
+
+  const take = (focus, source) => {
+    const key = findStarterSkillKeyForFocus(prof, build, focus, learned);
+    if (!key) return false;
+    learned[key] = 1;
+    c.skills.sources[key] = source;
+    return true;
+  };
+
+  for (let i = 0; i < 2; i++) take(buildFocus, "build");
+  for (let i = 0; i < 2; i++) take(profPrimary, "profession");
+  take(profSecondary, "profession");
+  take("", "build");
+
+  c.flags.starterSkillKitGranted = true;
+}
+
+function grantCompanionAutoSkillOnLevel(c, level) {
+  if (!c || !c.id) return false;
+  const lvl = Math.max(1, Math.floor(level || c.level || 1));
+  if (lvl % 2 !== 0) return false;
+  c.skills = c.skills || {};
+  c.skills.learned = c.skills.learned || {};
+  c.skills.sources = (c.skills.sources && typeof c.skills.sources === "object") ? c.skills.sources : {};
+  const learned = c.skills.learned;
+
+  const prof = String(c.profession || "fighter").trim().toLowerCase() || "fighter";
+  const build = String(c.build || "balanced").trim().toLowerCase() || "balanced";
+  const profDef = PROF_SKILL[prof] || PROF_SKILL.fighter;
+  const profFocuses = (Array.isArray(profDef.focuses) && profDef.focuses.length)
+    ? profDef.focuses.map((x) => String(x || "").trim().toLowerCase()).filter(Boolean)
+    : ["strength", "cunning", "arcana", "resilience"];
+  const profPrimary = profFocuses[0] || "strength";
+
+  let x = hashString(`comp:${c.id}:${prof}:${build}:auto:${lvl}`) >>> 0;
+  for (let tries = 0; tries < 1200; tries++) {
+    x = (Math.imul(x, 1664525) + 1013904223) >>> 0;
+    const idx = (x % SKILLS_PER_COMBO) + 1;
+    const key = skillKeyFor(prof, build, idx);
+    if (learned[key]) continue;
+    const def = skillDefFromParts(prof, build, idx);
+    const focus = String(def?.focus || "").toLowerCase();
+    let accept = 18;
+    if (focus === profPrimary) accept += 30;
+    if (def.powerful) accept += 20;
+    const roll = (x >>> 24) % 100;
+    if (roll >= accept) continue;
+    learned[key] = 1;
+    c.skills.sources[key] = "level";
+    return true;
+  }
+  return false;
+}
+
+function gainCompanionXp(amount, opts) {
+  if (!state) return;
+  normalizeState(state);
+  if (!state.party || !Array.isArray(state.party.members)) return;
+  const amt = Math.max(0, Math.floor(amount || 0));
+  if (amt <= 0) return;
+
+  const o = opts || {};
+  const rate = (typeof o.rate === "number") ? clamp(o.rate, 0, 2) : 1.0;
+
+  for (const c of state.party.members) {
+    if (!c || !c.id) continue;
+    ensureCompanionStarterSkills(c);
+    if (typeof c.xp !== "number" || !Number.isFinite(c.xp)) c.xp = 0;
+    const alive = (c.hp || 0) > 0;
+    const personalRate = (typeof o.deadRate === "number")
+      ? (alive ? rate : clamp(o.deadRate, 0, 1))
+      : (alive ? rate : 0.4);
+    const gain = Math.max(0, Math.floor(amt * personalRate));
+    if (gain <= 0) continue;
+    c.xp += gain;
+
+    let leveled = false;
+    while ((c.xp || 0) >= xpToNext(c.level || 1)) {
+      c.xp -= xpToNext(c.level || 1);
+      c.level = Math.max(1, Math.floor((c.level || 1) + 1));
+      leveled = true;
+      grantCompanionAutoSkillOnLevel(c, c.level);
+    }
+
+    if (leveled) {
+      appendLog(`⭐ ${c.name || "Companion"} reached Level ${c.level}.`);
+    }
+  }
+}
+
 function gainXp(amount) {
   if (!state) return;
   if (isAdminGodModeActive(state)) {
     applyAdminGodMode(state);
     return;
   }
-  state.xp += amount;
+  const amt = Math.max(0, Math.floor(amount || 0));
+  state.xp += amt;
   while (state.xp >= xpToNext(state.level)) {
     state.xp -= xpToNext(state.level);
     state.level += 1;
@@ -3753,6 +4738,7 @@ function gainXp(amount) {
     appendLog("You gained 10 Skill Points.");
     queueLevelUpDraftLevel(state, state.level);
   }
+  if (amt > 0) gainCompanionXp(amt, { rate: 1.0, deadRate: 0.4 });
   startNextLevelUpDraftIfNeeded(state);
 }
 
@@ -3920,20 +4906,60 @@ function pickMobForEncounter(s, kind) {
   const lvl = Math.max(1, Math.floor(s?.level || 1));
   const p = partySize(s);
   const baseTier = clamp(1 + Math.floor((lvl - 1) / 4), 1, 5);
-  const bump = Math.random() < 0.18 ? 1 : 0;
+  const bumpChance = lvl >= 16 ? 0.24 : 0.18;
+  const bump = Math.random() < bumpChance ? 1 : 0;
   const tier = clamp(baseTier + bump, 1, 5);
+
+  const tierFallback = clamp(tier - 1, 1, 5);
+  const canFacePartyMob = (def) => {
+    if (!def) return false;
+    if ((def.requiresPartySize || 1) <= p) return true;
+    const expected = 1 + (Math.max(1, Math.floor(def.tier || 1)) - 1) * 4;
+    const over = Math.max(0, lvl - expected);
+    const need = Math.max(1, Math.floor((def.requiresPartySize || 1) - p));
+    return over >= (3 + need * 2);
+  };
+
+  const ambushSkip = lvl >= 20 ? 0.55 : (lvl >= 12 ? 0.75 : 0.9);
 
   let tries = 0;
   while (tries < 80) {
     tries += 1;
-    const idx = 1 + Math.floor(Math.random() * MOB_COUNT);
+    const t = tries <= 60 ? tier : tierFallback;
+    const idx = (t - 1) * 60 + 1 + Math.floor(Math.random() * 60);
     const def = mobDef(idx);
-    if (def.tier !== tier && Math.random() < 0.75) continue;
-    if (def.requiresPartySize > p) continue;
-    if (kind === "ambush" && def.requiresParty && Math.random() < 0.9) continue;
+    if (kind === "ambush" && def.requiresParty && Math.random() < ambushSkip) continue;
+    if (!canFacePartyMob(def)) continue;
     return def;
   }
-  return mobDef(1 + Math.floor(Math.random() * 60));
+  return mobDef((tier - 1) * 60 + 1 + Math.floor(Math.random() * 60));
+}
+
+function scaleEnemyForPlayerLevel(enemy, s, encounterKind) {
+  if (!enemy || !s) return enemy;
+  const lvl = Math.max(1, Math.floor(s?.level || 1));
+  const tier = Math.max(1, Math.floor(enemy.tier || 1));
+  const expected = 1 + (tier - 1) * 4;
+  const over = Math.max(0, lvl - expected);
+  if (over <= 0) return enemy;
+
+  const kind = String(encounterKind || "").toLowerCase();
+  const isQuest = kind === "mission" || kind === "side";
+
+  const hpRate = isQuest ? 0.08 : 0.12;
+  const atkRate = isQuest ? 0.06 : 0.08;
+  const accRate = isQuest ? 0.008 : 0.010;
+
+  const powerfulBonus = enemy.powerful ? 1 : 0;
+  const hpMul = clamp((1 + over * hpRate) * (1 + powerfulBonus * 0.08), 1, isQuest ? 2.30 : 2.80);
+  const atkMul = clamp((1 + over * atkRate) * (1 + powerfulBonus * 0.07), 1, isQuest ? 1.85 : 2.00);
+  const accAdd = clamp(over * accRate + powerfulBonus * 0.01, 0, isQuest ? 0.10 : 0.12);
+
+  if (typeof enemy.maxHp === "number") enemy.maxHp = Math.max(1, Math.round(enemy.maxHp * hpMul));
+  if (typeof enemy.hp === "number" && typeof enemy.maxHp === "number") enemy.hp = Math.min(enemy.maxHp, Math.round(enemy.hp * hpMul));
+  if (typeof enemy.atk === "number") enemy.atk = Math.max(1, Math.round(enemy.atk * atkMul));
+  if (typeof enemy.acc === "number") enemy.acc = clamp(enemy.acc + accAdd, 0.50, 0.92);
+  return enemy;
 }
 
 function createCombatEvent(s, kind) {
@@ -3948,6 +4974,10 @@ function createCombatEvent(s, kind) {
       const m2 = mobDef(mob.index + 1 + i);
       enemies.push({ ...m2, hp: Math.floor(m2.maxHp * 0.8) });
     }
+  }
+
+  for (const e of enemies) {
+    scaleEnemyForPlayerLevel(e, s, kind);
   }
 
   return {
@@ -4141,7 +5171,7 @@ function executeCombatSkill(skillKey, ev) {
   }
   const def = skillDef(k);
   const rank = Math.max(1, Math.floor(state.skills.learned[k] || 1));
-  const rankMul = 1 + (rank - 1) * 0.12;
+  const rankMul = 1 + (rank - 1) * 0.15;
   const enemies = aliveEnemies(ev);
   if (!enemies.length) return false;
   const target = enemies[0];
@@ -4480,6 +5510,21 @@ function healPartyTarget(targetId, amount) {
   return heal;
 }
 
+function restoreManaPartyTarget(targetId, amount) {
+  if (!state) return 0;
+  const gain = Math.max(0, Math.floor(amount || 0));
+  if (gain <= 0) return 0;
+  if (targetId === "player") {
+    state.mana = Math.min(playerMaxMana(), (state.mana || 0) + gain);
+    return gain;
+  }
+  const c = findPartyMemberById(state, targetId);
+  if (!c) return 0;
+  if ((c.maxMana || 0) <= 0) return 0;
+  c.mana = Math.min(c.maxMana || 0, (c.mana || 0) + gain);
+  return gain;
+}
+
 function companionSkillLabel(c, salt) {
   const prof = String(c?.profession || "fighter").trim().toLowerCase() || "fighter";
   const build = String(c?.build || "balanced").trim().toLowerCase() || "balanced";
@@ -4501,8 +5546,33 @@ function companionAiAct(c, ev) {
   const build = String(c.build || "balanced").toLowerCase();
   const st = c.stats || { strength: 0, cunning: 0, arcana: 0, resilience: 0 };
   const hpPct = (c.maxHp || 1) > 0 ? (c.hp || 0) / (c.maxHp || 1) : 1;
+  const manaPct = (c.maxMana || 0) > 0 ? (c.mana || 0) / (c.maxMana || 1) : 1;
   const tier = clamp(1 + Math.floor((lvl - 1) / 2), 1, 5);
   const lvlMul = 1 + clamp((lvl - 1) * 0.05, 0, 0.85);
+
+  if (ev.stage === "combat") {
+    const inv = state.inventory || {};
+    if (hpPct > 0 && hpPct <= 0.35) {
+      if ((inv.health_potion || 0) > 0) {
+        useItem("health_potion", ev, c.id);
+        return;
+      }
+      if ((inv.bandage || 0) > 0) {
+        useItem("bandage", ev, c.id);
+        return;
+      }
+    }
+    if ((c.maxMana || 0) > 0 && manaPct >= 0 && manaPct <= 0.25) {
+      if ((inv.mana_potion || 0) > 0) {
+        useItem("mana_potion", ev, c.id);
+        return;
+      }
+      if ((inv.tonic || 0) > 0) {
+        useItem("tonic", ev, c.id);
+        return;
+      }
+    }
+  }
 
   const allies = allPartyActors(state)
     .filter((a) => a && (a.hp || 0) > 0)
@@ -4516,6 +5586,81 @@ function companionAiAct(c, ev) {
     c.mana = Math.max(0, Math.floor((c.mana || 0) - m));
     return true;
   };
+
+  const learned = c.skills?.learned || {};
+  const learnedKeys = Object.keys(learned).filter((k) => !!learned[k]);
+  const preferredSkill = (() => {
+    if (!learnedKeys.length) return null;
+    const focusPrio = (def) => {
+      const f = String(def?.focus || "").toLowerCase();
+      if (prof === "mage" && f === "arcana") return 5;
+      if (prof === "cleric" && (f === "resilience" || f === "arcana")) return 5;
+      if ((prof === "rogue" || build === "trickster") && f === "cunning") return 5;
+      if (prof === "fighter" && (f === "strength" || f === "resilience")) return 5;
+      if (prof === "ranger" && (f === "cunning" || f === "resilience")) return 5;
+      return 0;
+    };
+    const list = learnedKeys
+      .map((k) => {
+        const def = skillDef(k);
+        const rank = Math.max(1, Math.floor(learned[k] || 1));
+        return { k, def, rank, prio: focusPrio(def) };
+      })
+      .sort((a, b) => (b.prio - a.prio) || ((b.def?.tier || 1) - (a.def?.tier || 1)) || ((b.def?.powerful ? 1 : 0) - (a.def?.powerful ? 1 : 0)) || (b.rank - a.rank));
+    return list[0] || null;
+  })();
+
+  if (preferredSkill && Math.random() < 0.70) {
+    const def = preferredSkill.def;
+    const focus = String(def?.focus || "").toLowerCase();
+    const pow = def?.powerful ? 1 : 0;
+    const rank = preferredSkill.rank;
+    const tierSkill = Math.max(1, Math.floor(def?.tier || 1));
+
+    if (focus === "resilience") {
+      const needHeal = low && low.pct < 0.70;
+      const cost = Math.max(3, 4 + tierSkill * 2 + pow * 2);
+      if (needHeal && spendMana(cost)) {
+        const heal = Math.max(3, Math.floor(((7 + tierSkill * 4 + (st.resilience || 0) * 1.2 + (st.arcana || 0) * 0.6) * lvlMul) * (0.82 + Math.random() * 0.28) * (1 + (rank - 1) * 0.15)));
+        const did = healPartyTarget(low.id, heal);
+        pushCombatLog(ev, `✨ ${c.name} uses ${def.label} on ${low.id === "player" ? state.profile : low.name} (+${did} HP). (-${cost} mana)`);
+        return;
+      }
+    }
+
+    if (focus === "arcana" && spendMana(Math.max(3, 4 + tierSkill * 2 + pow * 2))) {
+      const cost = Math.max(3, 4 + tierSkill * 2 + pow * 2);
+      const dmg = Math.max(3, Math.floor(((8 + tierSkill * 4 + pow * 5 + (st.arcana || 0) * 1.4 + (st.cunning || 0) * 0.5) * lvlMul) * (0.82 + Math.random() * 0.35) * (1 + (rank - 1) * 0.15)));
+      target.hp = Math.max(0, (target.hp || 0) - dmg);
+      pushCombatLog(ev, `✨ ${c.name} casts ${def.label} on ${target.name} (-${dmg} HP). (-${cost} mana)`);
+      if (target.hp <= 0) pushCombatLog(ev, `✅ ${target.name} falls.`);
+      return;
+    }
+
+    if (focus === "cunning") {
+      const debuff = -clamp(0.10 + tierSkill * 0.03 + pow * 0.08 + (rank - 1) * 0.02 + (st.cunning || 0) * 0.003 + Math.random() * 0.06, 0.10, 0.55);
+      target.accMod = (typeof target.accMod === "number") ? Math.min(target.accMod, debuff) : debuff;
+      target.accModTurns = Math.max(target.accModTurns || 0, 2);
+      const dmg = Math.max(1, Math.floor(((4 + tierSkill * 3 + pow * 3 + (st.cunning || 0) * 1.0) * lvlMul) * (0.85 + Math.random() * 0.35) * (1 + (rank - 1) * 0.15)));
+      target.hp = Math.max(0, (target.hp || 0) - dmg);
+      pushCombatLog(ev, `🎯 ${c.name} uses ${def.label} on ${target.name} (-${dmg} HP). Enemy aim falters.`);
+      if (target.hp <= 0) pushCombatLog(ev, `✅ ${target.name} falls.`);
+      return;
+    }
+
+    if (focus === "strength") {
+      const dmg = Math.max(1, Math.floor(((5 + tierSkill * 4 + pow * 4 + (st.strength || 0) * 1.2) * lvlMul) * (0.85 + Math.random() * 0.35) * (1 + (rank - 1) * 0.15)));
+      target.hp = Math.max(0, (target.hp || 0) - dmg);
+      pushCombatLog(ev, `🗡️ ${c.name} uses ${def.label} on ${target.name} (-${dmg} HP).`);
+      if (target.hp > 0 && Math.random() < clamp(0.10 + tierSkill * 0.05 + pow * 0.08, 0.10, 0.65)) {
+        target.bleedTurns = Math.max(target.bleedTurns || 0, 2 + Math.floor(tierSkill / 2) + pow);
+        target.bleedDmg = Math.max(target.bleedDmg || 0, 1 + Math.floor(tierSkill / 2) + pow);
+        pushCombatLog(ev, `🩸 ${target.name} starts bleeding.`);
+      }
+      if (target.hp <= 0) pushCombatLog(ev, `✅ ${target.name} falls.`);
+      return;
+    }
+  }
 
   // Cleric/healer logic
   if (prof === "cleric") {
@@ -4593,6 +5738,365 @@ function companionsAutoAct(ev) {
   }
 }
 
+function isCrossroadsSiegeCombat(ev) {
+  return !!(ev && ev.kind === "combat" && ev.siege && ev.siege.key === "crossroads");
+}
+
+function createCrossroadsSiegeCombatEvent(s, phase) {
+  if (!s) return null;
+  normalizeState(s);
+  const ph = String(phase || "horde").trim().toLowerCase() || "horde";
+
+  const day = Math.max(1, Math.floor(s.world?.day || 1));
+  const tier = 5;
+  const seed = (hashString(`crossroads_siege:${s.profile}:${day}:${ph}`) >>> 0);
+  const idxBase = (tier - 1) * 60 + 1;
+
+  const pickTierIdx = (salt) => idxBase + ((seed + Math.imul(salt, 97)) >>> 0) % 60;
+
+  const ev = createCombatEvent(s, "siege", mobDef(pickTierIdx(1)));
+  ev.encounterKind = "siege";
+  ev.fromNode = "crossroads";
+  ev.didLoot = false;
+  ev.didSearch = false;
+  ev.didReward = false;
+  ev.guard = {};
+  ev.defeated = {};
+
+  ev.siege = {
+    key: "crossroads",
+    tier,
+    allies: ph === "overlord" ? 60 : 90,
+    phase: ph,
+    final: ph === "overlord",
+    seed,
+    round: 0,
+    spot: 0,
+  };
+
+  if (ph === "horde") {
+    const count = clamp(8 + (seed % 4), 8, 11);
+    const enemies = [];
+    for (let i = 0; i < count; i++) {
+      const def = mobDef(pickTierIdx(7 + i * 3));
+      const e = { ...def, hp: def.maxHp };
+      e.maxHp = Math.max(12, Math.floor((e.maxHp || 10) * 1.10 + 16));
+      e.hp = e.maxHp;
+      e.atk = Math.max(4, Math.floor((e.atk || 5) * 1.10 + 6));
+      e.acc = clamp((e.acc || 0.72) + 0.02, 0.55, 0.93);
+      if (i === 0 && Math.random() < 0.65) e.powerful = true;
+      scaleEnemyForPlayerLevel(e, s, "siege");
+      enemies.push(e);
+    }
+    ev.enemies = enemies;
+    ev.log = [
+      "🏰 Crossroads Siege — The Hostel.",
+      "A horde crashes into the streets. You brace at the hostel steps.",
+      "Dozens of adventurers rally beside you.",
+    ];
+    return ev;
+  }
+
+  const base = mobDef(pickTierIdx(33));
+  const boss = { ...base, hp: base.maxHp };
+  boss.powerful = true;
+  boss.name = `Overlord ${base.name}`;
+  boss.maxHp = Math.max(120, Math.floor((boss.maxHp || 40) * 4.6 + 420));
+  boss.hp = boss.maxHp;
+  boss.atk = Math.max(18, Math.floor((boss.atk || 8) * 2.15 + 22));
+  boss.acc = clamp((boss.acc || 0.75) + 0.10, 0.60, 0.95);
+  boss.siegeBoss = true;
+  boss.siegeBossHealCd = 0;
+  scaleEnemyForPlayerLevel(boss, s, "siege");
+
+  ev.enemies = [boss];
+  ev.log = [
+    "🔥 Crossroads Siege — The Overlord.",
+    "The horde breaks… and something larger steps through the smoke.",
+    "This ends here.",
+  ];
+  return ev;
+}
+
+function handleCrossroadsSiegeDefeat(ev) {
+  if (!state) return;
+  normalizeState(state);
+  state.flags = state.flags || {};
+
+  const phase = String(ev?.siege?.phase || ev?.siege?.stage || "").toLowerCase() || "siege";
+  state.flags["siege:crossroads:completed"] = true;
+  state.flags["siege:crossroads:failed"] = phase || true;
+
+  const oldGold = Math.max(0, Math.floor(state.gold || 0));
+  const keepGold = Math.min(35, Math.floor(oldGold * 0.06));
+  state.gold = keepGold;
+
+  state.inventory = state.inventory || {};
+  for (const k of Object.keys(state.inventory)) {
+    const kk = String(k || "").trim();
+    if (!kk) continue;
+    const def = (typeof itemDef === "function") ? itemDef(kk) : null;
+    const isConsumable = !!def?.consumable || /^consumable_/i.test(kk);
+    if (isConsumable) delete state.inventory[kk];
+  }
+  state.inventory.bandage = Math.max(1, Math.floor(state.inventory.bandage || 0));
+
+  const factions = (typeof FACTIONS !== "undefined" && Array.isArray(FACTIONS) && FACTIONS.length)
+    ? FACTIONS
+    : ["Guild", "Rebels", "Crown", "Wilds"];
+  for (const f of factions) adjustReputation(f, -3);
+
+  const seed = (hashString(`exile:${state.profile}:${Date.now()}`) >>> 0);
+  state.flags["exile:active"] = true;
+  state.flags["exile:seed"] = seed;
+  state.flags["exile:riskMissionsLeft"] = 5;
+
+  state.completed = { missions: {}, side: {} };
+  if (typeof genMissions === "function") state.missions = genMissions(MISSION_COUNT, seed);
+  if (typeof genSideQuests === "function") state.sideQuests = genSideQuests(SIDE_QUEST_COUNT, seed);
+  if (typeof marketStockCache !== "undefined") marketStockCache = null;
+
+  const maxHp = playerMaxHp();
+  const maxMana = playerMaxMana();
+  state.hp = Math.max(1, Math.min(maxHp, Math.floor(maxHp * 0.55)));
+  state.mana = Math.max(0, Math.min(maxMana, Math.floor(maxMana * 0.55)));
+  // FIX: clear lingering negative effects on exile resurrect - bleeding etc should not persist
+  try {
+    clearEffect("bleeding");
+    clearEffect("poisoned");
+    clearEffect("cursed");
+    if (state.effects) {
+      const keep = ["rested","shielded"];
+      const toClear = Object.keys(state.effects).filter(k => keep.indexOf(k) === -1);
+      for (let i=0;i<toClear.length;i++) clearEffect(toClear[i]);
+    }
+    addEffect("rested", 15000);
+  } catch(e) {}
+  if (state.party && Array.isArray(state.party.members)) {
+    for (const m of state.party.members) {
+      if (!m) continue;
+      m.hp = Math.max(1, Math.floor((m.maxHp || 1) * 0.45));
+      m.mana = Math.max(0, Math.floor((m.maxMana || 0) * 0.45));
+    }
+  }
+
+  state.activeQuest = null;
+  state.pendingSide = null;
+  state.world = state.world || {};
+  state.world.pendingEvent = null;
+
+  state.logCarry = [
+    "🏚️ Crossroads burns. The line breaks.",
+    "You survive — but you are cast out.",
+    `You keep your hard-won skills, but lose coin and supplies. (-${oldGold - keepGold} gold)`,
+    "A new town takes you in — wary, distant, and dangerous.",
+  ];
+
+  autoSave();
+  enterNode("exile_town");
+}
+
+function siegeSwarmSeed(ev) {
+  const n = ev?.siege?.seed;
+  if (typeof n === "number" && Number.isFinite(n)) return (n >>> 0);
+  const phase = String(ev?.siege?.phase || ev?.siege?.stage || "");
+  const tier = Math.max(1, Math.floor(ev?.siege?.tier || 5));
+  const day = Math.max(1, Math.floor(state?.world?.day || 1));
+  const lvl = Math.max(1, Math.floor(state?.level || 1));
+  return (hashString(`siege:crossroads:${state?.profile || ""}:${day}:${lvl}:${tier}:${phase}`) >>> 0);
+}
+
+function siegeSwarmNext(x) {
+  return (Math.imul((x >>> 0), 1664525) + 1013904223) >>> 0;
+}
+
+function siegeSwarmPick01(x) {
+  return ((x >>> 0) / 4294967296);
+}
+
+function siegeSwarmAdventurerAt(ev, index) {
+  const seed = siegeSwarmSeed(ev);
+  let x = (hashString(`swarm:${seed}:${Math.max(0, Math.floor(index || 0))}`) >>> 0);
+  x = siegeSwarmNext(x);
+  const profList = Array.isArray(PROFESSIONS) ? PROFESSIONS : [];
+  const buildList = Array.isArray(BUILDS) ? BUILDS : [];
+
+  const idx = Math.max(0, Math.floor(index || 0));
+  const profOff = (profList.length ? (seed % profList.length) : 0);
+  const buildOff = (buildList.length ? (seed % buildList.length) : 0);
+
+  const prof = profList.length
+    ? (profList[(idx + profOff + (x % profList.length)) % profList.length]?.key || "fighter")
+    : "fighter";
+
+  x = siegeSwarmNext(x);
+  let build = buildList.length
+    ? (buildList[(idx + buildOff) % buildList.length]?.key || "balanced")
+    : "balanced";
+
+  const playerBuild = String(state?.character?.build || "").toLowerCase();
+  if (buildList.length >= 2 && playerBuild && String(build).toLowerCase() === playerBuild) {
+    build = buildList[(idx + buildOff + 1) % buildList.length]?.key || build;
+  }
+
+  x = siegeSwarmNext(x);
+  const name = companionNameFromSeed(x);
+  return { name, profession: prof, build, seed: x };
+}
+
+function siegeSwarmSkillLine(a, label, targetName, extra) {
+  const p = professionDef(a.profession);
+  const b = buildDef(a.build);
+  const meta = `${p ? p.label : titleCaseWord(a.profession)} / ${b ? b.label : titleCaseWord(a.build)}`;
+  const tail = extra ? ` ${extra}` : "";
+  return `⚔️ ${a.name} (${meta}) uses ${label}${targetName ? ` on ${targetName}` : ""}.${tail}`;
+}
+
+function applySiegeSwarmAction(ev, a, enemies, roll01) {
+  const tier = Math.max(1, Math.floor(ev.siege?.tier || 5));
+  const lvl = Math.max(1, Math.floor(state.level || 1));
+  const phase = String(ev.siege?.phase || "").toLowerCase();
+  const powerMul = phase === "overlord" ? 0.12 : 0.24;
+  const p = String(a.profession || "fighter").toLowerCase();
+  const b = String(a.build || "balanced").toLowerCase();
+
+  const pickEnemy = () => {
+    const list = aliveEnemies(ev);
+    if (!list.length) return null;
+    return list[Math.floor(Math.random() * list.length)];
+  };
+
+  const dmgBase = (8 + tier * 5 + lvl * 0.35) * powerMul;
+  const healBase = (7 + tier * 3 + lvl * 0.28) * powerMul;
+
+  if (b === "tank" && roll01 < 0.32) {
+    const ids = alivePartyActorIds(state);
+    for (const id of ids) ev.guard[id] = 1;
+    return { dmg: 0, heal: 0, line: siegeSwarmSkillLine(a, "Shield Wall", "", "The line holds."), kind: "guard" };
+  }
+
+  if ((p === "cleric" || b === "mystic") && roll01 < 0.38) {
+    const heal = Math.max(4, Math.floor((healBase + Math.random() * (8 + tier * 3)) * (b === "mystic" ? 1.15 : 1)));
+    state.hp = Math.min(playerMaxHp(), (state.hp || 0) + heal);
+    if (state.party && Array.isArray(state.party.members) && Math.random() < 0.65) {
+      const alive = state.party.members.filter((m) => m && (m.hp || 0) > 0);
+      const t = alive.length ? alive[Math.floor(Math.random() * alive.length)] : null;
+      if (t) t.hp = Math.min(t.maxHp || 1, (t.hp || 0) + Math.max(1, Math.floor(heal * 0.75)));
+    }
+    return { dmg: 0, heal, line: siegeSwarmSkillLine(a, "Sanctuary", "", `(+${heal} HP)`), kind: "heal" };
+  }
+
+  if ((p === "rogue" || b === "trickster") && roll01 < 0.35) {
+    const e = pickEnemy();
+    if (!e) return { dmg: 0, heal: 0, line: "", kind: "none" };
+    const dmg = Math.max(4, Math.floor((dmgBase * 0.85 + Math.random() * (10 + tier * 3)) * (e.powerful ? 0.92 : 1)));
+    e.hp = Math.max(0, (e.hp || 0) - dmg);
+    const debuff = -clamp(0.10 + tier * 0.02 + Math.random() * 0.05, 0.10, 0.45);
+    e.accMod = (typeof e.accMod === "number") ? Math.min(e.accMod, debuff) : debuff;
+    e.accModTurns = Math.max(e.accModTurns || 0, 2);
+    if (e.hp > 0 && Math.random() < clamp(0.18 + tier * 0.05, 0.18, 0.65)) {
+      e.bleedTurns = Math.max(e.bleedTurns || 0, 2 + Math.floor(tier / 2));
+      e.bleedDmg = Math.max(e.bleedDmg || 0, 1 + Math.floor(tier / 2));
+    }
+    return { dmg, heal: 0, line: siegeSwarmSkillLine(a, "Shadow Cut", e.name, `(-${dmg} HP)`), kind: "strike" };
+  }
+
+  if ((p === "mage" || b === "mystic") && roll01 < 0.36) {
+    const cleave = Math.random() < 0.55;
+    const list = aliveEnemies(ev);
+    if (!list.length) return { dmg: 0, heal: 0, line: "", kind: "none" };
+    if (cleave) {
+      const per = Math.max(4, Math.floor((dmgBase * 0.60 + Math.random() * (8 + tier * 2))));
+      let total = 0;
+      for (const e of list) {
+        const dealt = Math.max(3, Math.floor(per * (e.powerful ? 0.92 : 1)));
+        e.hp = Math.max(0, (e.hp || 0) - dealt);
+        total += dealt;
+      }
+      return { dmg: total, heal: 0, line: siegeSwarmSkillLine(a, "Arcane Storm", "", `(-${per} HP each)`), kind: "cleave" };
+    }
+    const e = list[Math.floor(Math.random() * list.length)];
+    const dmg = Math.max(5, Math.floor((dmgBase * 1.05 + Math.random() * (14 + tier * 4)) * (e.powerful ? 0.90 : 1)));
+    e.hp = Math.max(0, (e.hp || 0) - dmg);
+    ev.partyDmgBoost = Math.max(ev.partyDmgBoost || 0, clamp(0.08 + tier * 0.02 + Math.random() * 0.05, 0.08, 0.40));
+    ev.partyDmgBoostTurns = Math.max(ev.partyDmgBoostTurns || 0, 1);
+    return { dmg, heal: 0, line: siegeSwarmSkillLine(a, "Void Lance", e.name, `(-${dmg} HP)`), kind: "strike" };
+  }
+
+  if ((p === "ranger" || b === "duelist") && roll01 < 0.33) {
+    const e = pickEnemy();
+    if (!e) return { dmg: 0, heal: 0, line: "", kind: "none" };
+    const burst = Math.random() < 0.40;
+    const mult = burst ? 1.35 : 1;
+    const dmg = Math.max(5, Math.floor(((dmgBase + Math.random() * (12 + tier * 3)) * mult) * (e.powerful ? 0.92 : 1)));
+    e.hp = Math.max(0, (e.hp || 0) - dmg);
+    return { dmg, heal: 0, line: siegeSwarmSkillLine(a, burst ? "Piercing Volley" : "Aimed Shot", e.name, `(-${dmg} HP)`), kind: "strike" };
+  }
+
+  const e = pickEnemy();
+  if (!e) return { dmg: 0, heal: 0, line: "", kind: "none" };
+  const dmg = Math.max(4, Math.floor((dmgBase + Math.random() * (10 + tier * 3)) * (e.powerful ? 0.92 : 1)));
+  e.hp = Math.max(0, (e.hp || 0) - dmg);
+  return { dmg, heal: 0, line: siegeSwarmSkillLine(a, "Steel Strike", e.name, `(-${dmg} HP)`), kind: "strike" };
+}
+
+function siegeSwarmAlliesAct(ev) {
+  if (!state || !ev) return;
+  if (!isCrossroadsSiegeCombat(ev)) return;
+  const allies = Math.max(0, Math.floor(ev.siege?.allies || 0));
+  if (allies <= 0) return;
+
+  const enemies = aliveEnemies(ev);
+  if (!enemies.length) return;
+
+  const tier = Math.max(1, Math.floor(ev.siege?.tier || 5));
+  const lvl = Math.max(1, Math.floor(state.level || 1));
+  const phase = String(ev.siege?.phase || "").toLowerCase();
+
+  ev.siege.round = Math.max(0, Math.floor(ev.siege.round || 0)) + 1;
+  ev.siege.spot = Math.max(0, Math.floor(ev.siege.spot || 0));
+
+  const actionCount = clamp(7 + Math.floor(allies / 45), 7, 16);
+  const highlightCount = clamp(3 + Math.floor(allies / 120), 3, 5);
+
+  let x = siegeSwarmSeed(ev);
+  x = siegeSwarmNext(x ^ (ev.siege.round * 2654435761));
+
+  let totalDmg = 0;
+  let totalHeal = 0;
+  let lines = 0;
+
+  for (let i = 0; i < actionCount; i++) {
+    x = siegeSwarmNext(x);
+    const r = siegeSwarmPick01(x);
+    const a = siegeSwarmAdventurerAt(ev, ev.siege.spot + i * 7 + (x % 11));
+    const out = applySiegeSwarmAction(ev, a, enemies, r);
+    totalDmg += Math.max(0, Math.floor(out.dmg || 0));
+    totalHeal += Math.max(0, Math.floor(out.heal || 0));
+    if (out.line && lines < highlightCount && Math.random() < 0.65) {
+      pushCombatLog(ev, out.line);
+      lines++;
+    }
+    if (aliveEnemies(ev).length <= 0) break;
+  }
+  ev.siege.spot += actionCount;
+
+  if (totalDmg > 0) pushCombatLog(ev, `🧨 The adventurer vanguard hits hard (-${totalDmg} HP across the enemy line).`);
+
+  const giftChance = phase === "overlord" ? clamp(0.08 + tier * 0.01, 0.05, 0.20) : clamp(0.14 + tier * 0.02, 0.12, 0.35);
+  if (Math.random() < giftChance) {
+    const mul = phase === "overlord" ? 0.55 : 0.80;
+    const heal = Math.max(3, Math.floor((8 + tier * 4 + lvl * 0.30) * mul * (0.85 + Math.random() * 0.35)));
+    state.hp = Math.min(playerMaxHp(), (state.hp || 0) + heal);
+    pushCombatLog(ev, `🧪 An ally hands you a potion (+${heal} HP).`);
+  }
+
+  const lineHoldChance = phase === "overlord" ? 0.12 : 0.22;
+  if (Math.random() < lineHoldChance) {
+    pushCombatLog(ev, "🛡️ Wounded adventurers are dragged back and treated; the line does not break." );
+  }
+}
+
 function partyAutoAttack(ev) {
   if (!state || !ev) return;
   const enemies = aliveEnemies(ev);
@@ -4638,8 +6142,62 @@ function enemiesAttack(ev) {
   const targets = alivePartyActorIds(state);
   if (!targets.length) return;
 
+  const isSiege = (typeof isCrossroadsSiegeCombat === "function") ? isCrossroadsSiegeCombat(ev) : false;
+
+  const doOverlordSpell = (e) => {
+    if (!isSiege) return false;
+    if (!e || !e.siegeBoss) return false;
+    const hp = Math.max(0, Math.floor(e.hp || 0));
+    const mhp = Math.max(1, Math.floor(e.maxHp || 1));
+    const hpPct = hp / mhp;
+    const atk = Math.max(1, Math.floor(e.atk || 8));
+
+    if (typeof e.siegeBossHealCd !== "number") e.siegeBossHealCd = 0;
+    e.siegeBossHealCd = Math.max(0, Math.floor(e.siegeBossHealCd));
+
+    if (hpPct <= 0.45 && e.siegeBossHealCd <= 0 && Math.random() < 0.55) {
+      const heal = Math.max(60, Math.floor(mhp * 0.18 + atk * 3.2 + Math.random() * 90));
+      e.hp = Math.min(mhp, hp + heal);
+      e.siegeBossHealCd = 3;
+      pushCombatLog(ev, `✨ ${e.name} casts Dark Mend (+${heal} HP).`);
+      return true;
+    }
+
+    if (Math.random() < 0.30) {
+      const ids = alivePartyActorIds(state);
+      let total = 0;
+      for (const id of ids) {
+        const dmg = Math.max(8, Math.floor(atk * 0.85 + Math.random() * 18));
+        total += applyDamageToPartyTarget(id, dmg, ev);
+      }
+      if (Math.random() < 0.45 && !hasEffectOnState(state, "cursed")) {
+        addEffect("cursed", 12000);
+        pushCombatLog(ev, `🕯️ ${e.name} spreads a curse.`);
+      }
+      pushCombatLog(ev, `💥 ${e.name} unleashes Shadow Nova (-${total} HP across your party).`);
+      return true;
+    }
+
+    if (Math.random() < 0.26) {
+      const tId = targets[Math.floor(Math.random() * targets.length)];
+      const dmg = Math.max(10, Math.floor(atk * 1.10 + Math.random() * 26));
+      const dealt = applyDamageToPartyTarget(tId, dmg, ev);
+      const siphon = Math.max(0, Math.floor(dealt * 0.60));
+      if (siphon > 0) e.hp = Math.min(mhp, Math.max(0, Math.floor(e.hp || 0)) + siphon);
+      pushCombatLog(ev, `🩸 ${e.name} uses Soul Siphon (-${dealt} HP, +${siphon} HP).`);
+      return true;
+    }
+    return false;
+  };
+
   for (const e of enemies) {
     if (!e || (e.hp || 0) <= 0) continue;
+
+    if (doOverlordSpell(e)) {
+      if (typeof e.siegeBossHealCd === "number" && e.siegeBossHealCd > 0) e.siegeBossHealCd -= 1;
+      continue;
+    }
+
     const tId = targets[Math.floor(Math.random() * targets.length)];
     const accMod = ((e.accModTurns || 0) > 0 && typeof e.accMod === "number") ? e.accMod : 0;
     const acc = clamp((e.acc || 0.7) + accMod, 0.25, 0.95);
@@ -4651,6 +6209,18 @@ function enemiesAttack(ev) {
     const dmg = Math.max(1, Math.floor((e.atk || 6) + Math.random() * 6));
     const dealt = applyDamageToPartyTarget(tId, dmg, ev);
     pushCombatLog(ev, `💥 ${e.name} hits ${tId === "player" ? state.profile : (findPartyMemberById(state, tId)?.name || "a companion")} (-${dealt} HP).`);
+
+    const name = String(e.name || "");
+    if (/\bvenom\b/i.test(name) && tId === "player" && dealt > 0) {
+      if (!hasEffectOnState(state, "poisoned") && Math.random() < 0.40) {
+        addEffect("poisoned", 12000);
+        pushCombatLog(ev, "☠️ Venom seeps into your blood (Poisoned)." );
+      }
+    }
+
+    if (isSiege && e.siegeBoss && typeof e.siegeBossHealCd === "number" && e.siegeBossHealCd > 0) {
+      e.siegeBossHealCd -= 1;
+    }
   }
 
   for (const e of enemies) {
@@ -4668,6 +6238,12 @@ function endCombatIfNeeded(ev) {
   const partyLeft = alivePartyActorIds(state).length;
 
   if ((state.hp || 0) <= 0) {
+    if (isCrossroadsSiegeCombat(ev) && typeof handleCrossroadsSiegeDefeat === "function") {
+      state.world.pendingEvent = null;
+      autoSave();
+      handleCrossroadsSiegeDefeat(ev);
+      return;
+    }
     state.world.pendingEvent = null;
     autoSave();
     enterNode("defeat");
@@ -4675,6 +6251,12 @@ function endCombatIfNeeded(ev) {
   }
 
   if (partyLeft <= 0) {
+    if (isCrossroadsSiegeCombat(ev) && typeof handleCrossroadsSiegeDefeat === "function") {
+      state.world.pendingEvent = null;
+      autoSave();
+      handleCrossroadsSiegeDefeat(ev);
+      return;
+    }
     state.world.pendingEvent = null;
     autoSave();
     enterNode("defeat");
@@ -4684,13 +6266,51 @@ function endCombatIfNeeded(ev) {
     ev.stage = "victory";
     if (!ev.didReward) {
       ev.didReward = true;
-      const count = Array.isArray(ev.enemies) ? ev.enemies.length : 1;
-      const topTier = Math.max(1, ...((ev.enemies || []).map((e) => Math.floor(e?.tier || 1))));
-      const xp = Math.max(8, Math.floor(10 + (state.level || 1) * 2 + topTier * 10 + count * 6));
-      pushCombatLog(ev, `🏆 Reward: +${xp} XP.`);
-      gainXp(xp);
+      if (isCrossroadsSiegeCombat(ev)) {
+        const phase = String(ev.siege?.phase || ev.siege?.stage || "").toLowerCase();
+        const isFinal = !!ev.siege?.final || phase === "overlord" || phase === "boss";
+        state.flags = state.flags || {};
+
+        const baseTier = Math.max(1, ...((ev.enemies || []).map((e) => Math.floor(e?.tier || 1))));
+        const baseCount = Array.isArray(ev.enemies) ? ev.enemies.length : 1;
+        const baseXp = Math.max(8, Math.floor(10 + (state.level || 1) * 2 + baseTier * 10 + baseCount * 6));
+
+        if (!isFinal) {
+          const xp = Math.max(baseXp, Math.floor(baseXp * 1.35));
+          pushCombatLog(ev, `🏆 Siege reward: +${xp} XP.`);
+          gainXp(xp);
+          state.flags["siege:crossroads:phaseWon"] = phase || "phase";
+        } else {
+          if (!state.flags["siege:crossroads:rewarded"]) {
+            state.flags["siege:crossroads:rewarded"] = true;
+            state.flags["siege:crossroads:completed"] = true;
+            const lvl = Math.max(1, Math.floor(state.level || 1));
+            const xp = Math.max(baseXp, Math.floor(xpToNext(lvl) * 0.90) + 800 + baseTier * 120);
+            const gold = Math.max(0, Math.floor(2500 + lvl * 40 + baseTier * 250));
+            pushCombatLog(ev, `🏰 Crossroads holds. The siege is broken.`);
+            pushCombatLog(ev, `🏆 Siege victory reward: +${xp} XP, +${gold} gold.`);
+            gainXp(xp);
+            state.gold = (state.gold || 0) + gold;
+            addInvItem(state, "phoenix_feather", 1);
+            addInvItem(state, "elixir", 2);
+            addInvItem(state, pickCombatDropKey(5, 0.02), 1);
+            addInvItem(state, pickCombatDropKey(5, 0.04), 1);
+            pushCombatLog(ev, "🎁 Loot bonus: Phoenix Feather, 2 Elixirs, and rare salvage." );
+          } else {
+            state.flags["siege:crossroads:completed"] = true;
+            pushCombatLog(ev, `🏆 Siege reward: +${baseXp} XP.`);
+            gainXp(baseXp);
+          }
+        }
+      } else {
+        const count = Array.isArray(ev.enemies) ? ev.enemies.length : 1;
+        const topTier = Math.max(1, ...((ev.enemies || []).map((e) => Math.floor(e?.tier || 1))));
+        const xp = Math.max(8, Math.floor(10 + (state.level || 1) * 2 + topTier * 10 + count * 6));
+        pushCombatLog(ev, `🏆 Reward: +${xp} XP.`);
+        gainXp(xp);
+      }
     }
-    pushCombatLog(ev, "🏁 Victory. The road is quiet again.");
+    pushCombatLog(ev, isCrossroadsSiegeCombat(ev) ? "🏁 Victory. Crossroads still stands." : "🏁 Victory. The road is quiet again.");
   }
 }
 
@@ -4700,6 +6320,25 @@ function combatPlayerAction(action) {
   const ev = state.world?.pendingEvent;
   if (!ev || ev.kind !== "combat") return;
   if (ev.stage !== "combat") return;
+
+  if (typeof action === "string" && action.startsWith("item_target:")) {
+    const k = action.slice("item_target:".length);
+    ev.uiMode = "item_target";
+    ev.uiItemKey = k;
+    renderPendingEvent();
+    return;
+  }
+
+  if (typeof action === "string" && action.startsWith("item_use:")) {
+    const rest = action.slice("item_use:".length);
+    const parts = rest.split(":");
+    const itemKey = String(parts[0] || "").trim();
+    const targetId = String(parts[1] || "").trim() || "player";
+    ev.uiMode = "main";
+    ev.uiItemKey = "";
+    if (itemKey) useItem(itemKey, ev, targetId);
+    return;
+  }
 
   if (action === "menu_skill") {
     ev.uiMode = "skill";
@@ -4730,38 +6369,59 @@ function combatPlayerAction(action) {
     for (const id of ids) ev.guard[id] = 1;
     pushCombatLog(ev, "🛡️ Your party braces and guards." );
   } else if (action === "item_bandage") {
-    ev.uiMode = "main";
-    useItem("bandage", ev);
+    ev.uiMode = "item_target";
+    ev.uiItemKey = "bandage";
+    renderPendingEvent();
+    return;
   } else if (action === "item_health_potion") {
-    ev.uiMode = "main";
-    useItem("health_potion", ev);
+    ev.uiMode = "item_target";
+    ev.uiItemKey = "health_potion";
+    renderPendingEvent();
+    return;
   } else if (action === "item_mana_potion") {
-    ev.uiMode = "main";
-    useItem("mana_potion", ev);
+    ev.uiMode = "item_target";
+    ev.uiItemKey = "mana_potion";
+    renderPendingEvent();
+    return;
   } else if (action === "item_tonic") {
+    ev.uiMode = "item_target";
+    ev.uiItemKey = "tonic";
+    renderPendingEvent();
+    return;
+  } else if (action === "item_phoenix_feather") {
+    ev.uiMode = "item_target";
+    ev.uiItemKey = "phoenix_feather";
+    renderPendingEvent();
+    return;
+  } else if (action === "item_antidote") {
     ev.uiMode = "main";
-    useItem("tonic", ev);
+    useItem("antidote", ev);
   } else if (action === "item_smoke_bomb") {
     ev.uiMode = "main";
     useItem("smoke_bomb", ev);
   } else if (action === "run") {
     ev.uiMode = "main";
-    const extra = (ev.escapeBoostTurns || 0) > 0 ? (ev.escapeBoost || 0) : 0;
-    const chance = clamp(0.42 + playerStat("cunning") * 0.03 + extra, 0.25, 0.93);
-    const ok = Math.random() < chance;
-    if ((ev.escapeBoostTurns || 0) > 0) {
-      ev.escapeBoostTurns = Math.max(0, Math.floor(ev.escapeBoostTurns - 1));
-      if (ev.escapeBoostTurns <= 0) ev.escapeBoost = 0;
+    partyDidAct = true;
+    if (isCrossroadsSiegeCombat(ev)) {
+      pushCombatLog(ev, "❌ There is no escape — this is your town." );
+    } else {
+      const extra = (ev.escapeBoostTurns || 0) > 0 ? (ev.escapeBoost || 0) : 0;
+      const chance = clamp(0.42 + playerStat("cunning") * 0.03 + extra, 0.25, 0.93);
+      const ok = Math.random() < chance;
+      if ((ev.escapeBoostTurns || 0) > 0) {
+        ev.escapeBoostTurns = Math.max(0, Math.floor(ev.escapeBoostTurns - 1));
+        if (ev.escapeBoostTurns <= 0) ev.escapeBoost = 0;
+      }
+      if (ok) {
+        pushCombatLog(ev, "🏃 You escape into the crowd." );
+        const back = ev.fromNode || "crossroads";
+        state.world.pendingEvent = null;
+        autoSave();
+        enterNode(back);
+        return;
+      }
+      pushCombatLog(ev, "❌ You try to flee but get boxed in." );
     }
-    if (ok) {
-      pushCombatLog(ev, "🏃 You escape into the crowd." );
-      const back = ev.fromNode || "crossroads";
-      state.world.pendingEvent = null;
-      autoSave();
-      enterNode(back);
-      return;
-    }
-    pushCombatLog(ev, "❌ You try to flee but get boxed in." );
   } else {
     ev.uiMode = "main";
     pushCombatLog(ev, "⚔️ You signal the attack!" );
@@ -4775,6 +6435,7 @@ function combatPlayerAction(action) {
   }
 
   if (ev.stage === "combat") {
+    siegeSwarmAlliesAct(ev);
     tickEnemyBleeds(ev);
     endCombatIfNeeded(ev);
   }
@@ -4887,7 +6548,7 @@ function computeCompanionSheet(level, prof, build, seedKey) {
   for (const [k, v] of Object.entries(p?.bonuses || {})) stats[k] = (stats[k] || 0) + Math.max(0, Math.floor(v || 0));
   for (const [k, v] of Object.entries(b?.bonuses || {})) stats[k] = (stats[k] || 0) + Math.max(0, Math.floor(v || 0));
 
-  const extra = Math.max(0, Math.floor((lvl - 1) * 0.8) + Math.floor((lvl - 1) / 3));
+  const extra = Math.max(0, Math.floor((lvl - 1) * 1.15) + Math.floor((lvl - 1) / 2));
   const profFocus = companionProfessionFocusKey(prof);
   const buildFocus = companionBuildFocusKey(build);
   const weights = {
@@ -4915,8 +6576,8 @@ function computeCompanionSheet(level, prof, build, seedKey) {
     }
   }
 
-  const baseHp = 24 + (p?.hpBonus || 0) + (b?.hpBonus || 0) + lvl * 4 + (stats.resilience || 0) * 3;
-  const baseMana = 12 + (p?.manaBonus || 0) + (b?.manaBonus || 0) + lvl * 3 + (stats.arcana || 0) * 3;
+  const baseHp = 30 + (p?.hpBonus || 0) + (b?.hpBonus || 0) + lvl * 6 + (stats.resilience || 0) * 4;
+  const baseMana = 14 + (p?.manaBonus || 0) + (b?.manaBonus || 0) + lvl * 4 + (stats.arcana || 0) * 4;
 
   return {
     stats,
@@ -5236,6 +6897,12 @@ function playEffectSfx(effectKey, kind, delayMs) {
     if (kind === "expire") return playChirp([base * 0.8, base * 1.1], 220, "triangle", 0.05, delay);
     if (kind === "clear") return playChirp([base * 0.9, base * 1.3], 140, "sine", 0.05, delay);
   }
+  if (k === "poisoned") {
+    if (kind === "apply") return playChirp([base * 1.05, base * 0.82, base * 1.05], 240, "square", 0.055, delay);
+    if (kind === "expire") return playChirp([base * 0.92, base * 1.15], 240, "triangle", 0.05, delay);
+    if (kind === "clear") return playChirp([base * 1.0, base * 1.25], 140, "sine", 0.05, delay);
+    if (kind === "tick") return playChirp([base * 0.78, base * 0.72], 95, "sine", 0.045, delay);
+  }
   if (k === "shielded") {
     if (kind === "apply") return playChirp([base * 1.2, base * 1.5, base * 1.85], 220, "triangle", 0.055, delay);
     if (kind === "expire") return playChirp([base * 1.85, base * 1.5, base * 1.2], 240, "sine", 0.05, delay);
@@ -5280,6 +6947,9 @@ function addEffect(key, durationMs) {
   if (key === "aether" && typeof state.effects[key].nextTickAt !== "number") {
     state.effects[key].nextTickAt = t + 4000;
   }
+  if (key === "poisoned" && typeof state.effects[key].nextTickAt !== "number") {
+    state.effects[key].nextTickAt = t + 4000;
+  }
   if (!wasActive) playEffectSfx(key, "apply");
   renderEffectsUi();
 }
@@ -5303,7 +6973,7 @@ function activeEffects() {
 let lastEffectsSig = "";
 function renderEffectsUi() {
   if (!state) {
-    document.body.classList.remove("fx-bleeding", "fx-rested", "fx-cursed", "fx-shielded");
+    document.body.classList.remove("fx-bleeding", "fx-rested", "fx-cursed", "fx-poisoned", "fx-shielded");
     if (fxBadges) fxBadges.innerHTML = "";
     return;
   }
@@ -5316,6 +6986,7 @@ function renderEffectsUi() {
   document.body.classList.toggle("fx-bleeding", has("bleeding"));
   document.body.classList.toggle("fx-rested", has("rested"));
   document.body.classList.toggle("fx-cursed", has("cursed"));
+  document.body.classList.toggle("fx-poisoned", has("poisoned"));
   document.body.classList.toggle("fx-shielded", has("shielded"));
 
   if (fxBadges) {
@@ -5397,6 +7068,21 @@ function tickEffects() {
       }
     }
   }
+
+  const poison = state.effects.poisoned;
+  if (poison && typeof poison.expiresAt === "number" && poison.expiresAt > t) {
+    if (typeof poison.nextTickAt !== "number") poison.nextTickAt = t + 4000;
+    if (t >= poison.nextTickAt) {
+      const missed = Math.min(5, Math.floor((t - poison.nextTickAt) / 4000) + 1);
+      poison.nextTickAt = poison.nextTickAt + missed * 4000;
+      const dealt = applyDamage(missed * 2, { fromEffect: true }) || 0;
+      playEffectSfx("poisoned", "tick");
+      appendLog(`☠️ Poison burns you (-${dealt} HP).`);
+      renderStats();
+      renderLog();
+      autoSave();
+    }
+  }
 }
 
 function badgeForDifficulty(diffKey) {
@@ -5405,15 +7091,25 @@ function badgeForDifficulty(diffKey) {
 }
 
 function missionTitle(i) {
+  const seedKey = arguments.length >= 2 ? arguments[1] : 0;
+  const seed = Math.floor(seedKey || 0);
   const verbs = ["Recover", "Escort", "Investigate", "Hunt", "Guard", "Deliver", "Explore", "Breach", "Rescue", "Map"];
   const nouns = ["the Ruins", "the Wildwood", "the Old Road", "a Relic", "a Caravan", "a Beacon", "a Lost Mage", "a Smuggler Ring", "the Shadow Cell", "the Sun Vault"];
-  return `${verbs[i % verbs.length]} ${nouns[i % nouns.length]}`;
+  if (!seed) return `${verbs[i % verbs.length]} ${nouns[i % nouns.length]}`;
+  const hv = (hashString(`town:${seed}:mission:${i}:v`) >>> 0);
+  const hn = (hashString(`town:${seed}:mission:${i}:n`) >>> 0);
+  return `${verbs[hv % verbs.length]} ${nouns[hn % nouns.length]}`;
 }
 
 function sideQuestTitle(i) {
+  const seedKey = arguments.length >= 2 ? arguments[1] : 0;
+  const seed = Math.floor(seedKey || 0);
   const a = ["Whispers", "Ashes", "Lanterns", "Oaths", "Crows", "Mist", "Coins", "Runes", "Fires", "Echoes"];
   const b = ["in the Market", "by Moonlight", "of the Marsh", "of the Fallen", "at the Shrine", "under Stone", "of the River", "of the Watch", "of the Hollow", "at Dawn"];
-  return `${a[i % a.length]} ${b[i % b.length]}`;
+  if (!seed) return `${a[i % a.length]} ${b[i % b.length]}`;
+  const ha = (hashString(`town:${seed}:side:${i}:a`) >>> 0);
+  const hb = (hashString(`town:${seed}:side:${i}:b`) >>> 0);
+  return `${a[ha % a.length]} ${b[hb % b.length]}`;
 }
 
 function pickDifficultyByIndex(i) {
@@ -5425,6 +7121,8 @@ function pickDifficultyByIndex(i) {
 }
 
 function genMissions(count) {
+  const seedKey = arguments.length >= 2 ? arguments[1] : 0;
+  const seed = Math.floor(seedKey || 0);
   const missions = [];
   for (let i = 0; i < count; i++) {
     const diff = pickDifficultyByIndex(i);
@@ -5436,7 +7134,7 @@ function genMissions(count) {
     missions.push({
       id: `m${i + 1}`,
       kind: "mission",
-      title: `#${i + 1} ${missionTitle(i)}`,
+      title: `#${i + 1} ${missionTitle(i, seed)}`,
       difficulty: diff,
       recLevel,
       faction,
@@ -5448,18 +7146,28 @@ function genMissions(count) {
 }
 
 function genSideQuests(count) {
+  const seedKey = arguments.length >= 2 ? arguments[1] : 0;
+  const seed = Math.floor(seedKey || 0);
   const quests = [];
   const places = ["Virelia Gate", "Old Harbor", "Moonwell", "High Market", "Wind Shrine", "Blackwood Edge", "Stonebridge", "Glass Marsh"];
+  const exileA = ["Ash", "Lantern", "Moon", "Cinder", "Iron", "Glass", "Fog", "Shadow", "Salt", "Storm", "Dawn", "Grave", "Gutter", "Hollow", "Bitter", "Black", "White", "Copper", "Sable", "Bright"];
+  const exileB = ["Gate", "Row", "Spur", "Crossing", "Stairs", "Arcade", "Spire", "Canal", "Cistern", "Shrine", "Bridge", "Vault", "Yard", "Lane", "Court", "Bazaar", "Foundry", "Chapel", "Wharf", "Keep"];
   for (let i = 0; i < count; i++) {
     const minLevel = 1 + Math.floor(i / 15);
     const faction = FACTIONS[(i + 2) % FACTIONS.length];
+    let place = places[i % places.length];
+    if (seed) {
+      const ha = (hashString(`town:${seed}:place:${i}:a`) >>> 0);
+      const hb = (hashString(`town:${seed}:place:${i}:b`) >>> 0);
+      place = `${exileA[ha % exileA.length]} ${exileB[hb % exileB.length]}`;
+    }
     quests.push({
       id: `s${i + 1}`,
       kind: "side",
-      title: `Side Quest ${i + 1}: ${sideQuestTitle(i)}`,
+      title: `Side Quest ${i + 1}: ${sideQuestTitle(i, seed)}`,
       minLevel,
       faction,
-      place: places[i % places.length],
+      place,
       xp: 18 + Math.floor(i * 1.7),
       gold: 6 + Math.floor(i * 0.6),
     });
@@ -5519,7 +7227,7 @@ function startQuest(q) {
       {
         label: "Back to Town",
         className: "secondary",
-        onChoose: () => enterNode("crossroads"),
+        onChoose: () => enterNode(hubNodeId(state)),
       },
     ]);
     render();
@@ -5554,6 +7262,12 @@ function badgeText(q) {
   return `[${d.label}]`;
 }
 
+function hubNodeId(s) {
+  if (!s) return "crossroads";
+  if (!isAdminProfile(s.profile) && !!s.flags?.["exile:active"]) return "exile_town";
+  return "crossroads";
+}
+
 function missionSuccessChance(q, approach) {
   const rep = (state.reputation && state.reputation[q.faction]) ? state.reputation[q.faction] : 0;
   const levelEdge = state.level - q.recLevel;
@@ -5564,6 +7278,14 @@ function missionSuccessChance(q, approach) {
   if (approach === "scout") chance += 0.08;
   if (approach === "negotiate") chance += clamp(rep * 0.02, -0.08, 0.10);
   if (approach === "charge") chance -= 0.06;
+  if (
+    state
+    && !isAdminProfile(state.profile)
+    && !!state.flags?.["exile:active"]
+    && Math.max(0, Math.floor(state.flags?.["exile:riskMissionsLeft"] || 0)) > 0
+  ) {
+    chance -= 0.10;
+  }
   return clamp(chance, 0.15, 0.92);
 }
 
@@ -5676,7 +7398,7 @@ function createSideTaskEvent(s, q, choice, approach) {
       rewardXp: q.xp,
       rewardGold: q.gold,
       faction: q.faction,
-      returnNode: "crossroads",
+      returnNode: hubNodeId(s),
       minLevel: q.minLevel,
       choice,
       approach,
@@ -5862,7 +7584,7 @@ function sideTaskResolve(actionKey) {
       if (state.hp > 0) {
         showChoices([
           { label: "Another Side Quest", onChoose: () => { activeTab = "side"; questPage = 0; setTabUi(); render(); } },
-          { label: "Return to Crossroads", className: "secondary", onChoose: () => enterNode("crossroads") },
+          { label: "Return to Town", className: "secondary", onChoose: () => enterNode(hubNodeId(state)) },
         ]);
       }
       return;
@@ -5885,7 +7607,7 @@ function sideTaskResolve(actionKey) {
         title: q.title,
         rewardXp: Math.floor((q.rewardXp || 0) * 0.35),
         rewardGold: Math.floor((q.rewardGold || 0) * 0.15),
-        returnNode: "crossroads",
+        returnNode: hubNodeId(state),
         completed: false,
       };
       state.world.pendingEvent = cev;
@@ -5928,7 +7650,7 @@ function createMissionNegotiationEvent(s, q) {
       rewardXp: q.xp,
       rewardGold: q.gold,
       faction: q.faction,
-      returnNode: "crossroads",
+      returnNode: hubNodeId(s),
       recLevel: q.recLevel,
       difficulty: q.difficulty,
     },
@@ -5940,6 +7662,10 @@ function missionNegotiateResolve(actionKey) {
   normalizeState(state);
   const ev = state.world?.pendingEvent;
   if (!ev || ev.kind !== "mission" || ev.subtype !== "negotiate") return;
+
+  const exilePenalty = ev.exileRisk
+    ? (typeof ev.exileRiskPenalty === "number" ? ev.exileRiskPenalty : 0.10)
+    : 0;
 
   const q = ev.quest;
   const a = String(actionKey || "").trim().toLowerCase();
@@ -5963,7 +7689,7 @@ function missionNegotiateResolve(actionKey) {
 
   const check = (base, perStat, statKey, repMul) => {
     const stat = playerStat(statKey);
-    const chance = clamp(base + stat * perStat + rep * repMul - pressure * 0.04 - Math.max(0, dt - 2) * 0.03, 0.10, 0.92);
+    const chance = clamp(base + stat * perStat + rep * repMul - pressure * 0.04 - Math.max(0, dt - 2) * 0.03 - exilePenalty, 0.10, 0.92);
     return { chance, ok: roll < chance };
   };
 
@@ -5974,7 +7700,7 @@ function missionNegotiateResolve(actionKey) {
         lines.push("You reach for coin — but you don't have enough.");
       } else {
         state.gold -= cost;
-        const c = clamp(0.62 + rep * 0.05 - pressure * 0.03 - Math.max(0, dt - 2) * 0.04, 0.18, 0.90);
+        const c = clamp(0.62 + rep * 0.05 - pressure * 0.03 - Math.max(0, dt - 2) * 0.04 - exilePenalty, 0.18, 0.90);
         if (roll < c) {
           ev.edge = (ev.edge || 0) + 1;
           lines.push("Coin changes hands. Doors open.");
@@ -6027,7 +7753,7 @@ function missionNegotiateResolve(actionKey) {
         lines.push("You can't afford to sweeten the deal.");
       } else {
         state.gold -= cost;
-        const c = clamp(0.66 + rep * 0.04 - pressure * 0.03 - Math.max(0, dt - 2) * 0.04, 0.20, 0.92);
+        const c = clamp(0.66 + rep * 0.04 - pressure * 0.03 - Math.max(0, dt - 2) * 0.04 - exilePenalty, 0.20, 0.92);
         if (roll < c) {
           ev.edge = (ev.edge || 0) + 1;
           lines.push("You offer more. The terms soften.");
@@ -6077,7 +7803,7 @@ function missionNegotiateResolve(actionKey) {
 
     const finalRoll = Math.random();
     const finalChance = clamp(
-      0.34 + (ev.edge || 0) * 0.16 - (ev.heat || 0) * 0.10 + rep * 0.02 + playerStat("cunning") * 0.02 - pressure * 0.05 - Math.max(0, dt - 2) * 0.03,
+      0.34 + (ev.edge || 0) * 0.16 - (ev.heat || 0) * 0.10 + rep * 0.02 + playerStat("cunning") * 0.02 - pressure * 0.05 - Math.max(0, dt - 2) * 0.03 - exilePenalty,
       0.08,
       0.92
     );
@@ -6096,7 +7822,7 @@ function missionNegotiateResolve(actionKey) {
       render();
       showChoices([
         { label: "Next Mission", onChoose: () => { activeTab = "missions"; setTabUi(); render(); } },
-        { label: "Return to Crossroads", className: "secondary", onChoose: () => enterNode("crossroads") },
+        { label: "Return to Town", className: "secondary", onChoose: () => enterNode(hubNodeId(state)) },
       ]);
       autoSave();
       return;
@@ -6113,7 +7839,7 @@ function missionNegotiateResolve(actionKey) {
       rewardXp: q.rewardXp,
       rewardGold: q.rewardGold,
       faction: q.faction,
-      returnNode: "crossroads",
+      returnNode: hubNodeId(state),
       completed: false,
     };
     pushCombatLog(cev, "⚠️ Negotiation failed: the enemy strikes while you're exposed.");
@@ -6130,6 +7856,13 @@ function attemptMission(q, approach) {
   if (!state) return;
   normalizeState(state);
 
+  const riskLeft = Math.max(0, Math.floor(state.flags?.["exile:riskMissionsLeft"] || 0));
+  const applyExileRisk = !!state.flags?.["exile:active"] && !isAdminProfile(state.profile) && riskLeft > 0;
+  if (applyExileRisk) {
+    state.flags["exile:riskMissionsLeft"] = Math.max(0, riskLeft - 1);
+    appendLog(`⚠️ Exile risk: your first missions here are dangerous (-10% mission outcomes). Remaining: ${Math.max(0, riskLeft - 1)}.`);
+  }
+
   if (approach === "scout") {
     appendLog("You move quietly: counting patrols, measuring distances, reading footprints.");
   } else if (approach === "negotiate") {
@@ -6140,6 +7873,10 @@ function attemptMission(q, approach) {
 
   if (approach === "negotiate") {
     const nev = createMissionNegotiationEvent(state, q);
+    if (applyExileRisk) {
+      nev.exileRisk = true;
+      nev.exileRiskPenalty = 0.10;
+    }
     state.world.pendingEvent = nev;
     autoSave();
     renderPendingEvent();
@@ -6149,6 +7886,16 @@ function attemptMission(q, approach) {
   const mob = pickMissionMobForQuest(state, q);
   const ev = createCombatEvent(state, "mission", mob);
   tuneMissionCombatEvent(ev, q);
+  if (applyExileRisk) {
+    ev.exileRisk = true;
+    ev.exileRiskPenalty = 0.10;
+    for (const e of ev.enemies || []) {
+      if (!e) continue;
+      if (typeof e.atk === "number") e.atk = Math.max(1, Math.floor(e.atk * 1.06));
+      if (typeof e.acc === "number") e.acc = clamp(e.acc + 0.02, 0.50, 0.95);
+    }
+    pushCombatLog(ev, "⚠️ Exile risk: enemies press harder in unfamiliar territory." );
+  }
   ev.quest = {
     kind: "mission",
     id: q.id,
@@ -6156,7 +7903,7 @@ function attemptMission(q, approach) {
     rewardXp: q.xp,
     rewardGold: q.gold,
     faction: q.faction,
-    returnNode: "crossroads",
+    returnNode: hubNodeId(state),
     completed: false,
   };
   if (approach === "scout") {
@@ -6192,6 +7939,9 @@ function beginSideQuest(q, choice) {
 }
 
 function finalizeSideQuest(q, choice, approach) {
+  const baseRisk = Math.max(0, q.minLevel - state.level);
+  const riskRoll = Math.random();
+
   if (choice === "refuse") {
     appendLog("You turn away. In Virelia, every refusal becomes a rumor.");
     adjustReputation(q.faction, -1);
@@ -6201,7 +7951,7 @@ function finalizeSideQuest(q, choice, approach) {
     render();
     showChoices([
       { label: "Back to Quest Board", className: "secondary", onChoose: () => render() },
-      { label: "Crossroads", className: "secondary", onChoose: () => enterNode("crossroads") },
+      { label: "Town", className: "secondary", onChoose: () => enterNode(hubNodeId(state)) },
     ]);
     return;
   }
@@ -6775,6 +8525,14 @@ function roamMaybeSkillTrader(s) {
 function roamAct(s, kind) {
   if (!s) return;
   normalizeState(s);
+  if (typeof isCombatActive === 'function' && isCombatActive(s)) {
+    appendLog("You can't rest during combat.");
+    return;
+  }
+  if (typeof hasEffectOnState === 'function' && hasEffectOnState(s, "rested")) {
+    appendLog("You aren't ready to rest again yet. (Rested cooldown active)");
+    return;
+  }
   const roam = ensureRoamState(s);
   const area = roamAreaDef(roam.areaKey);
   roam.steps += 1;
@@ -6782,7 +8540,11 @@ function roamAct(s, kind) {
   if (kind === "rest") {
     roam.risk = clamp(roam.risk - 30, 0, 100);
     s.hp = Math.min(s.maxHp || 1, (s.hp || 0) + 2);
-    appendLog("You slow your breathing and let the noise pass. (+2 HP)");
+    s.mana = Math.min(typeof playerMaxMana === 'function' ? playerMaxMana() : (s.maxMana||0), (s.mana||0)+1);
+    appendLog("You slow your breathing and let the noise pass. (+2 HP, +1 mana)");
+    if (typeof addEffect === 'function') addEffect("rested", 15000);
+    if (typeof autoSave === 'function') autoSave();
+    if (typeof render === 'function') render();
     return;
   }
 
@@ -6903,6 +8665,14 @@ function destinationFoundFlag(def) {
 function destinationAct(s, def, kind) {
   if (!s || !def) return;
   normalizeState(s);
+  if (typeof isCombatActive === 'function' && isCombatActive(s)) {
+    appendLog("You can't rest during combat.");
+    return;
+  }
+  if (typeof hasEffectOnState === 'function' && hasEffectOnState(s, "rested")) {
+    appendLog("You aren't ready to rest again yet. (Rested cooldown active)");
+    return;
+  }
   const msgA = [
     `A door closes somewhere behind you in ${def.name}.`,
     `A pair of eyes track you from the edge of ${def.name}.`,
@@ -6918,7 +8688,11 @@ function destinationAct(s, def, kind) {
 
   if (kind === "rest") {
     s.hp = Math.min(s.maxHp || 1, (s.hp || 0) + 2);
-    appendLog("You take a breath and let the crowd swallow your presence. (+2 HP)");
+    s.mana = Math.min(typeof playerMaxMana === 'function' ? playerMaxMana() : (s.maxMana||0), (s.mana||0)+1);
+    appendLog("You take a breath and let the crowd swallow your presence. (+2 HP, +1 mana)");
+    if (typeof addEffect === 'function') addEffect("rested", 15000);
+    if (typeof autoSave === 'function') autoSave();
+    if (typeof render === 'function') render();
     return;
   }
 
@@ -7013,6 +8787,7 @@ function createSkillTraderEvent(s) {
   const prof = s.character?.profession || "fighter";
   const build = s.character?.build || "balanced";
   const offers = [];
+  const offerBases = new Set();
   const learned = s.skills?.learned || {};
   let tries = 0;
   while (offers.length < 6 && tries < 600) {
@@ -7021,7 +8796,11 @@ function createSkillTraderEvent(s) {
     const k = skillKeyFor(prof, build, idx);
     if (learned[k]) continue;
     if (offers.includes(k)) continue;
+    if (typeof canLearnSkillByBaseLabel === "function" && !canLearnSkillByBaseLabel(s, k)) continue;
+    const base = (typeof skillFamilyIdForKey === "function") ? String(skillFamilyIdForKey(k) || "").trim() : "";
+    if (base && offerBases.has(base)) continue;
     offers.push(k);
+    if (base) offerBases.add(base);
   }
   return {
     kind: "skillTrader",
@@ -7042,6 +8821,11 @@ function buySkillFromTrader(skillKey) {
     renderPendingEvent();
     return;
   }
+  if (typeof canLearnSkillByBaseLabel === "function" && !canLearnSkillByBaseLabel(state, k)) {
+    appendLog("You already know a stronger version of that skill.");
+    renderPendingEvent();
+    return;
+  }
 
   const def = skillDef(k);
   const cost = skillPointCost(def);
@@ -7052,9 +8836,14 @@ function buySkillFromTrader(skillKey) {
   }
 
   state.skillPoints -= cost;
-  state.skills.learned[k] = 1;
   state.skills.sources = (state.skills.sources && typeof state.skills.sources === "object") ? state.skills.sources : {};
-  if (!state.skills.sources[k]) state.skills.sources[k] = skillSourceForKey(state, k, def);
+  const src = state.skills.sources[k] || skillSourceForKey(state, k, def);
+  if (typeof replaceLearnedSkillByBaseLabel === "function") {
+    replaceLearnedSkillByBaseLabel(state, k, 1, src);
+  } else {
+    state.skills.learned[k] = 1;
+    if (!state.skills.sources[k]) state.skills.sources[k] = src;
+  }
   playChirp([560, 820, 1120], 190, "triangle", 0.055, 0);
   appendLog(`✨ Learned from a Skill Trader: ${def.label}. (-${cost} Skill Points)`);
   autoSave();
@@ -7129,11 +8918,10 @@ function renderPendingEvent() {
 
     const phase = Math.max(0, Math.floor(ev.phase || 0));
     if (phase === 0) {
-      const bribeCost = Math.max(1, Math.floor(ev.goldCost || 10));
       showChoices([
         { label: "Scout Contacts (Cunning)", onChoose: () => missionNegotiateResolve("contacts") },
         { label: "Call in a Favor", className: "secondary", onChoose: () => missionNegotiateResolve("favor") },
-        { label: `Bribe (${bribeCost} gold)`, className: "secondary", disabled: (state.gold || 0) < bribeCost, onChoose: () => missionNegotiateResolve("bribe") },
+        { label: `Bribe (${Math.max(1, Math.floor(ev.goldCost || 10))} gold)`, className: "secondary", disabled: (state.gold || 0) < Math.max(1, Math.floor(ev.goldCost || 10)), onChoose: () => missionNegotiateResolve("bribe") },
         { label: "Abort", className: "secondary", onChoose: () => missionNegotiateResolve("abort") },
       ]);
     } else if (phase === 1) {
@@ -7251,14 +9039,26 @@ function renderPendingEvent() {
     outputEl.appendChild(logWrap);
 
     if (ev.stage === "victory") {
+      const isSiege = (typeof isCrossroadsSiegeCombat === "function") ? isCrossroadsSiegeCombat(ev) : false;
+      const siegePhase = String(ev?.siege?.phase || "").toLowerCase();
+      const canAdvanceSiege = isSiege && siegePhase === "horde" && (typeof createCrossroadsSiegeCombatEvent === "function");
       const hasQuest = !!ev.quest && !ev.quest.completed;
       showChoices([
         { label: ev.didLoot ? "Looted" : "Loot", className: ev.didLoot ? "secondary" : "", onChoose: () => combatLoot(ev) },
         { label: ev.didSearch ? "Searched" : "Search", className: ev.didSearch ? "secondary" : "", onChoose: () => combatSearch(ev) },
         ...(hasQuest ? [{ label: "Complete Quest", onChoose: () => combatCompleteQuest(ev) }] : []),
+        ...(canAdvanceSiege ? [{
+          label: "Face the Overlord",
+          onChoose: () => {
+            state.world.pendingEvent = createCrossroadsSiegeCombatEvent(state, "overlord");
+            autoSave();
+            renderPendingEvent();
+          },
+        }] : []),
         {
-          label: "Leave",
+          label: canAdvanceSiege ? "Leave (Siege ongoing)" : "Leave",
           className: "secondary",
+          disabled: canAdvanceSiege,
           onChoose: () => {
             const back = ev.fromNode || state.nodeId || "crossroads";
             state.world.pendingEvent = null;
@@ -7310,6 +9110,86 @@ function renderPendingEvent() {
         return;
       }
 
+      if (mode === "item_target") {
+        const itemKey = String(ev.uiItemKey || "").trim();
+        if (!itemKey) {
+          ev.uiMode = "main";
+          renderPendingEvent();
+          return;
+        }
+
+        if (itemKey === "phoenix_feather") {
+          const dead = (Array.isArray(state.party?.members) ? state.party.members : [])
+            .filter((m) => m && m.id && (m.hp || 0) <= 0);
+
+          if (!dead.length) {
+            showChoices([
+              { label: "No fallen companion to revive", className: "secondary", disabled: true, onChoose: () => {} },
+              { label: "Back", className: "secondary", onChoose: () => combatPlayerAction("menu_back") },
+            ]);
+            outputEl.scrollTop = outputEl.scrollHeight;
+            renderStats();
+            return;
+          }
+
+          const buttons = [];
+          for (const m of dead) {
+            const name = m?.name || "Companion";
+            const hp = `${m?.hp || 0}/${m?.maxHp || 0} HP`;
+            buttons.push({
+              label: `Use ${itemLabel(itemKey)} on ${name} (${hp})`,
+              className: "secondary",
+              onChoose: () => combatPlayerAction(`item_use:${itemKey}:${m.id}`),
+            });
+          }
+
+          showChoices([
+            ...buttons,
+            { label: "Back", className: "secondary", onChoose: () => combatPlayerAction("menu_back") },
+          ]);
+          outputEl.scrollTop = outputEl.scrollHeight;
+          renderStats();
+          return;
+        }
+
+        const ids = alivePartyActorIds(state);
+        const buttons = [];
+        const isManaItem = itemKey === "mana_potion" || itemKey === "tonic";
+
+        for (const id of ids) {
+          if (!id) continue;
+          if (id === "player") {
+            const hp = `${state.hp || 0}/${playerMaxHp()} HP`;
+            const mana = `${state.mana || 0}/${playerMaxMana()} mana`;
+            buttons.push({
+              label: `Use ${itemLabel(itemKey)} on ${state.profile || "You"} (${isManaItem ? mana : hp})`,
+              className: "secondary",
+              onChoose: () => combatPlayerAction(`item_use:${itemKey}:player`),
+            });
+          } else {
+            const m = findPartyMemberById(state, id);
+            const name = m?.name || "Companion";
+            const hp = `${m?.hp || 0}/${m?.maxHp || 0} HP`;
+            const mana = `${m?.mana || 0}/${m?.maxMana || 0} mana`;
+            const disabled = isManaItem && ((m?.maxMana || 0) <= 0);
+            buttons.push({
+              label: `Use ${itemLabel(itemKey)} on ${name} (${isManaItem ? mana : hp})`,
+              className: "secondary",
+              disabled,
+              onChoose: () => combatPlayerAction(`item_use:${itemKey}:${id}`),
+            });
+          }
+        }
+
+        showChoices([
+          ...buttons,
+          { label: "Back", className: "secondary", onChoose: () => combatPlayerAction("menu_back") },
+        ]);
+        outputEl.scrollTop = outputEl.scrollHeight;
+        renderStats();
+        return;
+      }
+
       const items = [];
       items.push({
         label: `Bandage (${state.inventory.bandage || 0})`,
@@ -7334,6 +9214,21 @@ function renderPendingEvent() {
         className: "secondary",
         disabled: (state.inventory.tonic || 0) <= 0,
         onChoose: () => combatPlayerAction("item_tonic"),
+      });
+      const deadCompanions = (Array.isArray(state.party?.members) ? state.party.members : []).some((m) => m && m.id && (m.hp || 0) <= 0);
+      if (deadCompanions) {
+        items.push({
+          label: `Phoenix Feather (${state.inventory.phoenix_feather || 0})`,
+          className: "secondary",
+          disabled: (state.inventory.phoenix_feather || 0) <= 0,
+          onChoose: () => combatPlayerAction("item_phoenix_feather"),
+        });
+      }
+      items.push({
+        label: `Antidote (${state.inventory.antidote || 0})`,
+        className: "secondary",
+        disabled: (state.inventory.antidote || 0) <= 0,
+        onChoose: () => combatPlayerAction("item_antidote"),
       });
       items.push({
         label: `Smoke Bomb (${state.inventory.smoke_bomb || 0})`,
@@ -7377,7 +9272,14 @@ function renderPendingEvent() {
 
   const list = document.createElement("div");
   list.className = "skillList";
+  const seenBases = new Set();
   for (const k of ev.offers || []) {
+    if (!k) continue;
+    if (typeof canLearnSkillByBaseLabel === "function" && !canLearnSkillByBaseLabel(state, k)) continue;
+    const base = (typeof skillFamilyIdForKey === "function") ? String(skillFamilyIdForKey(k) || "").trim() : "";
+    if (base && seenBases.has(base)) continue;
+    if (base) seenBases.add(base);
+
     const def = skillDef(k);
     const row = document.createElement("div");
     row.className = `skillRow${def.powerful ? " powerful" : ""}`;
@@ -7408,7 +9310,8 @@ function renderPendingEvent() {
 
     const buy = document.createElement("button");
     buy.textContent = "Learn";
-    buy.disabled = (state.skillPoints || 0) < skillPointCost(def) || !!state.skills.learned[def.key];
+    const canLearn = (typeof canLearnSkillByBaseLabel === "function") ? canLearnSkillByBaseLabel(state, def.key) : true;
+    buy.disabled = (state.skillPoints || 0) < skillPointCost(def) || !!state.skills.learned[def.key] || !canLearn;
     buy.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -7446,6 +9349,7 @@ function statValue(s, key) {
   if (state && s === state && (k === "strength" || k === "cunning" || k === "arcana" || k === "resilience")) {
     return playerStat(k);
   }
+
   const v = s.stats[k];
   return (typeof v === "number" && Number.isFinite(v)) ? v : 0;
 }
@@ -7563,13 +9467,37 @@ function runStoryChoice(ch) {
 
 function showChoices(choices) {
   clearChoices();
+  const isRested = !!(state && typeof hasEffectOnState === 'function' && hasEffectOnState(state, "rested"));
+  const isInCombat = !!(state && typeof isCombatActive === 'function' && isCombatActive(state));
+  const isInDraft = !!(state && typeof hasActiveLevelUpDraft === 'function' && hasActiveLevelUpDraft(state));
+  
   for (const c of choices) {
     const b = document.createElement("button");
     b.textContent = c.label;
     if (c.className) b.className = c.className;
-    if (c.disabled) b.disabled = true;
+    // Disable all actions when resting (except back/cancel/close/leave to allow navigation, but main actions blocked)
+    if (c.disabled) {
+      b.disabled = true;
+    } else if (isRested && !isInCombat && !isInDraft) {
+      const labelLower = String(c.label||"").toLowerCase();
+      const isBack = labelLower.includes("back") || labelLower.includes("cancel") || labelLower.includes("close") || labelLower.includes("leave") || labelLower.includes("town") || labelLower.includes("crossroads") || labelLower.includes("gate");
+      // Block main gameplay actions during rest, allow only back/cancel type
+      if (!isBack) {
+        b.disabled = true;
+        b.title = "Resting... All actions paused until rested ends";
+      }
+    }
     b.addEventListener("click", () => {
       if (guardLevelUpDraft()) return;
+      if (state && typeof hasEffectOnState === 'function' && hasEffectOnState(state, "rested") && !isInCombat && !isInDraft) {
+        const labelLower = String(c.label||"").toLowerCase();
+        const isBack = labelLower.includes("back") || labelLower.includes("cancel") || labelLower.includes("close") || labelLower.includes("leave") || labelLower.includes("town") || labelLower.includes("crossroads") || labelLower.includes("gate");
+        if (!isBack && !c.disabled) {
+          appendLog("You are resting. All actions paused until rested ends.");
+          render();
+          return;
+        }
+      }
       const inEvent = !!(state && state.world && state.world.pendingEvent);
       if (!inEvent) {
         const beforeLen = (state && Array.isArray(state.log)) ? state.log.length : 0;
@@ -7584,6 +9512,22 @@ function showChoices(choices) {
       if (state && state.world && state.world.pendingEvent) render();
     });
     choicesEl.appendChild(b);
+  }
+
+  if (isRested && !isInCombat && !isInDraft) {
+    const restHint = document.createElement("div");
+    restHint.className = "hint";
+    restHint.style.marginTop = "10px";
+    restHint.style.color = "#2ad37b";
+    restHint.style.fontWeight = "700";
+    try {
+      const eff = state.effects && state.effects.rested;
+      const sec = eff && typeof eff.expiresAt === 'number' ? Math.max(0, Math.ceil((eff.expiresAt - Date.now())/1000)) : 0;
+      restHint.textContent = "💤 Resting... All actions paused for " + sec + "s. Wait until rested ends to continue.";
+    } catch {
+      restHint.textContent = "💤 Resting... All actions paused until rested ends.";
+    }
+    choicesEl.appendChild(restHint);
   }
 }
 
@@ -7646,15 +9590,34 @@ function pickMobForDifficulty(s, tier) {
 function enterNode(id) {
   if (!state) return;
   normalizeState(state);
+  if (id === "crossroads" && !isAdminProfile(state.profile) && !!state.flags?.["exile:active"]) id = "exile_town";
   state.nodeId = id;
-  startNextLevelUpDraftIfNeeded(state);
-  if (hasActiveLevelUpDraft(state)) {
-    renderLevelUpDraft();
-    return;
-  }
   if (id === "tavern") {
     renderTavern();
     return;
+  }
+  if (
+    id === "crossroads"
+    && !isAdminProfile(state.profile)
+    && !(state.world && state.world.pendingEvent)
+    && (state.level || 1) >= 60
+    && !(state.flags && state.flags["siege:crossroads:completed"])
+    && (typeof createCrossroadsSiegeCombatEvent === "function")
+  ) {
+    state.flags = state.flags || {};
+    const started = !!state.flags["siege:crossroads:started"];
+    const phaseWon = String(state.flags["siege:crossroads:phaseWon"] || "").toLowerCase();
+    const nextPhase = (started && phaseWon === "horde") ? "overlord" : "horde";
+    state.flags["siege:crossroads:started"] = true;
+    state.world.pendingEvent = createCrossroadsSiegeCombatEvent(state, nextPhase);
+    autoSave();
+    renderPendingEvent();
+    return;
+  }
+  startNextLevelUpDraftIfNeeded(state);
+  if (hasActiveLevelUpDraft(state)) {
+    renderLevelUpDraft();
+    return; 
   }
   if (state.world && state.world.pendingEvent && !isAdminProfile(state.profile)) {
     renderPendingEvent();
@@ -7815,6 +9778,7 @@ const STORY = {
             s.character.build = b.key;
             applyCharacterSelections();
             s.character.created = true;
+            grantStarterKitIfNeeded(s);
             grantStarterSkillKitIfNeeded(s);
             appendLog(`Build chosen: ${b.label}.`);
             appendLog(`You begin as: ${characterSummary(s)}.`);
@@ -7902,8 +9866,44 @@ const STORY = {
       }
       if (invStage === 2) c.unshift({ label: "Follow the Investigation Lead", next: "investigate_lead" });
       if (invStage === 3) c.unshift({ label: "Deliver Findings", next: "investigate_report" });
+      if (!getFlag("lanternCellarOpened") && (s.inventory?.lantern_cellar_key || 0) > 0) {
+        c.unshift({ label: "Return to the Lantern Cellar", next: "lantern_cellar" });
+      }
+      if (!getFlag("sunVaultOpened") && (s.inventory?.sun_vault_key || 0) > 0) {
+        c.unshift({ label: "Open the Sun Vault", next: "sun_vault" });
+      }
+      if (!getFlag("guildSealTurnedIn") && (s.inventory?.guild_seal || 0) > 0) {
+        c.unshift({ label: "Present the Guild Seal", next: "guild_contact" });
+      }
+      if (!getFlag("crownWritTurnedIn") && (s.inventory?.crown_writ || 0) > 0) {
+        c.unshift({ label: "Present the Crown Writ", next: "crown_contact" });
+      }
+      if (!getFlag("rebelTokenTurnedIn") && (s.inventory?.rebel_token || 0) > 0) {
+        c.unshift({ label: "Present the Rebel Token", next: "rebel_contact" });
+      }
       if ((s.gold || 0) >= 30) c.push({ label: "Buy a Charm (+Max HP)", next: "crossroads", effect: () => { s.gold -= 30; s.maxHp += 4; s.hp = Math.min(s.maxHp, s.hp + 4); appendLog("You buy a small charm. Your breath steadies."); } });
       c.push({ label: "Return to Gate", className: "secondary", next: "gate" });
+      return c;
+    },
+  },
+
+  exile_town: {
+    text: (s) => {
+      const risk = Math.max(0, Math.floor(s.flags?.["exile:riskMissionsLeft"] || 0));
+      const riskLine = risk > 0
+        ? `The locals warn you: the first jobs here are killers. High risk missions remaining: ${risk}.`
+        : "You’re learning the streets. The worst of the risk has passed.";
+      return `An exile town huddles under dim lanterns.\n${riskLine}`;
+    },
+    choices: (s) => {
+      const c = [
+        { label: "Browse Missions", next: "exile_town", effect: () => { activeTab = "missions"; setTabUi(); } },
+        { label: "Browse Side Quests", next: "exile_town", effect: () => { activeTab = "side"; setTabUi(); } },
+        { label: "Visit the Market", next: "market" },
+        { label: "Travel Destinations (50 places)", next: "travel_destinations" },
+        { label: "Free Roam (explore)", next: "free_roam_select" },
+        { label: "Visit the Tavern (recruit party)", next: "tavern" },
+      ];
       return c;
     },
   },
@@ -8095,6 +10095,160 @@ const STORY = {
     ],
   },
 
+  guild_contact: {
+    text: (s) => `A Guild factor waits in the shade of the quest board.\n"You have something for us?"\nGold: ${s.gold}`,
+    choices: [
+      {
+        label: "Hand over the Guild Seal",
+        next: "crossroads",
+        require: (s) => {
+          if (getFlag("guildSealTurnedIn")) {
+            appendLog("You already delivered the seal.");
+            return false;
+          }
+          if ((s.inventory?.guild_seal || 0) <= 0) {
+            appendLog("You don't have a Guild Seal.");
+            return false;
+          }
+          return true;
+        },
+        effect: (s) => {
+          consumeInvItem(s, "guild_seal", 1);
+          setFlag("guildSealTurnedIn", true);
+          adjustReputation("Guild", 2);
+          s.gold += 30;
+          addInvItem(s, "sigil_of_the_guildmaster", 1);
+          appendLog("The factor pockets the seal and slides you a stamped sigil." );
+          openItemModal("sigil_of_the_guildmaster");
+        },
+      },
+      { label: "Back", className: "secondary", next: "crossroads" },
+    ],
+  },
+
+  crown_contact: {
+    text: (s) => `A Crown clerk stands crisp and still.\n"Writ?"\nGold: ${s.gold}`,
+    choices: [
+      {
+        label: "Submit the Crown Writ",
+        next: "crossroads",
+        require: (s) => {
+          if (getFlag("crownWritTurnedIn")) {
+            appendLog("You already submitted the writ.");
+            return false;
+          }
+          if ((s.inventory?.crown_writ || 0) <= 0) {
+            appendLog("You don't have a Crown Writ.");
+            return false;
+          }
+          return true;
+        },
+        effect: (s) => {
+          consumeInvItem(s, "crown_writ", 1);
+          setFlag("crownWritTurnedIn", true);
+          adjustReputation("Crown", 2);
+          s.gold += 28;
+          addInvItem(s, "amulet_of_unbroken_oath", 1);
+          appendLog("The clerk nods once and returns with an oathbound amulet." );
+          openItemModal("amulet_of_unbroken_oath");
+        },
+      },
+      { label: "Back", className: "secondary", next: "crossroads" },
+    ],
+  },
+
+  rebel_contact: {
+    text: (s) => `A Rebel runner appears like a shadow behind the stalls.\n"Token."\nGold: ${s.gold}`,
+    choices: [
+      {
+        label: "Show the Rebel Token",
+        next: "crossroads",
+        require: (s) => {
+          if (getFlag("rebelTokenTurnedIn")) {
+            appendLog("You already used that token.");
+            return false;
+          }
+          if ((s.inventory?.rebel_token || 0) <= 0) {
+            appendLog("You don't have a Rebel Token.");
+            return false;
+          }
+          return true;
+        },
+        effect: (s) => {
+          consumeInvItem(s, "rebel_token", 1);
+          setFlag("rebelTokenTurnedIn", true);
+          adjustReputation("Rebels", 2);
+          s.gold += 26;
+          addInvItem(s, "rebel_commander_band", 1);
+          appendLog("The runner grins and presses a worn band into your palm." );
+          openItemModal("rebel_commander_band");
+        },
+      },
+      { label: "Back", className: "secondary", next: "crossroads" },
+    ],
+  },
+
+  sun_vault: {
+    text: (s) => `You find a sealed door marked with a sunburst.\nThe key in your pack feels heavy.\nGold: ${s.gold}`,
+    choices: [
+      {
+        label: "Use the Sun Vault Key",
+        next: "crossroads",
+        require: (s) => {
+          if (getFlag("sunVaultOpened")) {
+            appendLog("The Sun Vault has already been opened.");
+            return false;
+          }
+          if ((s.inventory?.sun_vault_key || 0) <= 0) {
+            appendLog("You don't have the key.");
+            return false;
+          }
+          return true;
+        },
+        effect: (s) => {
+          consumeInvItem(s, "sun_vault_key", 1);
+          setFlag("sunVaultOpened", true);
+          s.gold += 80;
+          gainXp(120);
+          addInvItem(s, "crown_of_the_sun_vault", 1);
+          appendLog("The vault sighs open. Light spills out like warm water." );
+          openItemModal("crown_of_the_sun_vault");
+        },
+      },
+      { label: "Back", className: "secondary", next: "crossroads" },
+    ],
+  },
+
+  lantern_cellar: {
+    text: (s) => `You return to the lantern-shop cellar door. The lock still smells of oil.\nGold: ${s.gold}`,
+    choices: [
+      {
+        label: "Use the Lantern Cellar Key",
+        next: "crossroads",
+        require: (s) => {
+          if (getFlag("lanternCellarOpened")) {
+            appendLog("The cellar has already been picked clean.");
+            return false;
+          }
+          if ((s.inventory?.lantern_cellar_key || 0) <= 0) {
+            appendLog("You don't have the key.");
+            return false;
+          }
+          return true;
+        },
+        effect: (s) => {
+          consumeInvItem(s, "lantern_cellar_key", 1);
+          setFlag("lanternCellarOpened", true);
+          s.gold += 24;
+          addInvItem(s, "rune_shard", 1);
+          addInvItem(s, "ember_gem", 1);
+          appendLog("The cellar opens. You find a hidden pouch and two warm stones in the dust." );
+        },
+      },
+      { label: "Back", className: "secondary", next: "crossroads" },
+    ],
+  },
+
   market: {
     text: (s) => {
       const keys = marketStockKeys();
@@ -8119,9 +10273,13 @@ const STORY = {
           setFlag("heardRumors", true);
         },
       });
+      out.push({ label: "Visit the Alchemist", next: "alchemist" });
+      out.push({ label: "Visit the Enchanter", next: "enchanter" });
+      out.push({ label: "Visit the Crafter", next: "crafter" });
+      out.push({ label: "Visit the Healer", next: "healer" });
       out.push({ label: "Visit the Blacksmith", next: "blacksmith" });
       out.push({ label: "Ask about mercenaries (Tavern)", next: "tavern" });
-      out.push({ label: "Back to Crossroads", className: "secondary", next: "crossroads" });
+      out.push({ label: "Back to Town", className: "secondary", next: (getFlag("exile:active") ? "exile_town" : "crossroads") });
       return out;
     },
   },
@@ -8165,6 +10323,178 @@ const STORY = {
     },
   },
 
+  alchemist: {
+    text: (s) => {
+      const met = !!getFlag("metAlchemist");
+      return met
+        ? `A brass still bubbles beside bundles of herbs.\n"Need a brew?"\nGold: ${s.gold}`
+        : `An alchemist in stained gloves watches you measure the shelves.\n"If you brought herbs, I can make something useful."\nGold: ${s.gold}`;
+    },
+    choices: (s) => {
+      const out = [];
+      const met = !!getFlag("metAlchemist");
+      if (!met) {
+        out.push({
+          label: "Introduce yourself",
+          next: "alchemist",
+          effect: () => {
+            setFlag("metAlchemist", true);
+            appendLog("The alchemist nods. \"Herbs for coin. Coin for cures. Simple.\"");
+          },
+        });
+      }
+
+      for (const r of ALCHEMIST_RECIPES) {
+        const reqLine = Object.entries(r.req || {}).map(([k, v]) => `${itemLabel(k)} x${v}`).join(", ") || "(none)";
+        const can = met && canCraftRecipe(s, r);
+        out.push({
+          label: `${r.label} (${reqLine}${r.gold ? `, ${r.gold}g` : ""})`,
+          next: "alchemist",
+          disabled: !can,
+          effect: () => {
+            craftRecipeAtAlchemist(r.key);
+          },
+        });
+      }
+      out.push({ label: "Back to Market", className: "secondary", next: "market" });
+      return out;
+    },
+  },
+
+  enchanter: {
+    text: (s) => {
+      const met = !!getFlag("metEnchanter");
+      return met
+        ? `An enchanter traces runes in the air that fade like smoke.\n"Show me what you found."\nGold: ${s.gold}`
+        : `A hooded enchanter glances at your hands.\n"If you carry shards and ember, I can bind them."\nGold: ${s.gold}`;
+    },
+    choices: (s) => {
+      const out = [];
+      const met = !!getFlag("metEnchanter");
+      if (!met) {
+        out.push({
+          label: "Introduce yourself",
+          next: "enchanter",
+          effect: () => {
+            setFlag("metEnchanter", true);
+            appendLog("The enchanter inclines their head. \"Ruin becomes craft. Craft becomes power.\"");
+          },
+        });
+      }
+
+      for (const r of ENCHANTER_RECIPES) {
+        const reqLine = Object.entries(r.req || {}).map(([k, v]) => `${itemLabel(k)} x${v}`).join(", ") || "(none)";
+        const can = met && canCraftRecipe(s, r);
+        out.push({
+          label: `${r.label} (${reqLine}${r.gold ? `, ${r.gold}g` : ""})`,
+          next: "enchanter",
+          disabled: !can,
+          effect: () => {
+            craftRecipeAtEnchanter(r.key);
+          },
+        });
+      }
+      out.push({ label: "Back to Market", className: "secondary", next: "market" });
+      return out;
+    },
+  },
+
+  crafter: {
+    text: (s) => {
+      const met = !!getFlag("metCrafter");
+      return met
+        ? `A crafter has needle, awl, and fresh-cut timber laid out.\n"What do you need made?"\nGold: ${s.gold}`
+        : `A crafter looks up from leatherwork.\n"Bring cloth, leather, lumber. I’ll make it hold."\nGold: ${s.gold}`;
+    },
+    choices: (s) => {
+      const out = [];
+      const met = !!getFlag("metCrafter");
+      if (!met) {
+        out.push({
+          label: "Introduce yourself",
+          next: "crafter",
+          effect: () => {
+            setFlag("metCrafter", true);
+            appendLog("The crafter grins. \"Materials talk. I just translate.\"");
+          },
+        });
+      }
+
+      for (const r of CRAFTER_RECIPES) {
+        const reqLine = Object.entries(r.req || {}).map(([k, v]) => `${itemLabel(k)} x${v}`).join(", ") || "(none)";
+        const can = met && canCraftRecipe(s, r);
+        out.push({
+          label: `${r.label} (${reqLine}${r.gold ? `, ${r.gold}g` : ""})`,
+          next: "crafter",
+          disabled: !can,
+          effect: () => {
+            craftRecipeAtCrafter(r.key);
+          },
+        });
+      }
+      out.push({ label: "Back to Market", className: "secondary", next: "market" });
+      return out;
+    },
+  },
+
+  healer: {
+    text: (s) => {
+      const met = !!getFlag("metHealer");
+      const fx = activeEffects().map((e) => e.key).join(", ") || "None";
+      return met
+        ? `A healer washes their hands and studies your breathing.\n"What ails you?"\nEffects: ${fx}\nGold: ${s.gold}`
+        : `A quiet shrine smells of herbs and clean water.\nA healer looks up.\n"I can mend you — for a price."\nGold: ${s.gold}`;
+    },
+    choices: (s) => {
+      const out = [];
+      const met = !!getFlag("metHealer");
+      if (!met) {
+        out.push({
+          label: "Introduce yourself",
+          next: "healer",
+          effect: () => {
+            setFlag("metHealer", true);
+            appendLog("The healer nods. \"Pain is common. Relief costs.\"");
+          },
+        });
+      }
+
+      out.push({
+        label: "Cure ailments (12g)",
+        next: "healer",
+        disabled: !met || (!isAdminProfile(s.profile) && (s.gold || 0) < 12),
+        effect: () => {
+          if (!spendGold(12)) return;
+          clearEffect("bleeding");
+          clearEffect("poisoned");
+          clearEffect("cursed");
+          appendLog("The healer murmurs a prayer. The worst of it fades.");
+        },
+      });
+      out.push({
+        label: "Treat wounds (15g)",
+        next: "healer",
+        disabled: !met || (!isAdminProfile(s.profile) && (s.gold || 0) < 15),
+        effect: () => {
+          if (!spendGold(15)) return;
+          const heal = Math.max(6, Math.floor(playerMaxHp() * 0.35));
+          s.hp = Math.min(playerMaxHp(), (s.hp || 0) + heal);
+          if (s.party && Array.isArray(s.party.members)) {
+            for (const m of s.party.members) {
+              if (!m) continue;
+              const h = Math.max(4, Math.floor((m.maxHp || 1) * 0.35));
+              m.hp = Math.min(m.maxHp || 1, (m.hp || 0) + h);
+            }
+          }
+          appendLog("Bandages, salves, and steady hands." );
+        },
+      });
+
+      out.push({ label: "Back to Market", className: "secondary", next: "market" });
+      return out;
+    },
+  },
+
   tavern: {
     text: () => "",
     choices: () => [],
@@ -8187,7 +10517,33 @@ const STORY = {
           state.gold = Math.max(0, state.gold - 20);
           state.hp = Math.max(1, Math.floor(playerMaxHp() * 0.6));
           state.mana = Math.min(playerMaxMana(), state.mana + 10);
-          appendLog("A priest takes a donation and leaves you with water.");
+          // FIX: clear all lingering detrimental effects on resurrection
+          // Previously bleeding/poisoned/cursed persisted after death
+          try {
+            clearEffect("bleeding");
+            clearEffect("poisoned");
+            clearEffect("cursed");
+            clearEffect("aether");
+            // Clear any other effect that could kill again immediately
+            if (state.effects) {
+              // Keep rested if you want, but clear others
+              const toClear = Object.keys(state.effects).filter(k => !["rested","shielded"].includes(k));
+              for (const k of toClear) clearEffect(k);
+            }
+            addEffect("rested", 15000);
+          } catch(e) {}
+          appendLog("A priest takes a donation and leaves you with water. The ailments of your fall fade.");
+          // Also heal companions partially so they don't stay dead with effects?
+          if (state.party && Array.isArray(state.party.members)) {
+            for (const m of state.party.members) {
+              if (!m) continue;
+              // Revive companions at 25% if dead, and clear their debuffs if any (companions don't store effects, but hp)
+              if ((m.hp||0) <= 0) {
+                m.hp = Math.max(1, Math.floor((m.maxHp||1)*0.25));
+                m.mana = Math.max(0, Math.floor((m.maxMana||0)*0.25));
+              }
+            }
+          }
         },
       },
       {
@@ -8206,14 +10562,95 @@ const STORY = {
 
 registerDestinations();
 
+let questRankFilter = "all";
+let marketRankFilter = "all";
+let marketRankSelectEl = null;
+
+function getQuestBoardElements() {
+  return {
+    title: document.getElementById('questBoardTitle'),
+    tabs: document.getElementById('questBoardTabs'),
+    panel: document.getElementById('questsPanel')
+  };
+}
+
+function updateQuestBoardTitle() {
+  const els = getQuestBoardElements();
+  const isMarket = !!(state && (state.nodeId || "") === "market");
+  if (els.title) {
+    // SHOP BOARD feature: switch name when in market node
+    els.title.textContent = isMarket ? "-- SHOP BOARD --" : "-- QUEST BOARD --";
+    // Add visual distinction
+    if (isMarket) {
+      els.title.setAttribute('data-mode', 'shop');
+      els.title.title = 'Shop Board - Rank filter + search active. Use item ranking to find gear.';
+    } else {
+      els.title.setAttribute('data-mode', 'quest');
+      els.title.title = 'Quest Board - filter by difficulty';
+    }
+  }
+  if (els.tabs) {
+    els.tabs.style.display = isMarket ? "none" : "flex";
+  }
+  if (els.panel) {
+    if (isMarket) {
+      els.panel.classList.add('shop-mode');
+      els.panel.classList.remove('quest-mode');
+    } else {
+      els.panel.classList.add('quest-mode');
+      els.panel.classList.remove('shop-mode');
+    }
+  }
+}
+
+
 function renderQuestList() {
-  questListEl.innerHTML = "";
-  if (!state) return;
+  if (!state) {
+    questListEl.innerHTML = "";
+    return;
+  }
+
+  // Update board title: Quest Board vs Shop Board
+  if (typeof updateQuestBoardTitle === 'function') updateQuestBoardTitle();
 
   if ((state.nodeId || "") === "market") {
     renderMarketList();
     return;
   }
+
+  questListEl.innerHTML = "";
+
+  const filterRow = document.createElement("div");
+  filterRow.className = "row";
+  filterRow.style.marginTop = "0";
+  const filterLabel = document.createElement("div");
+  filterLabel.className = "hint";
+  filterLabel.style.marginTop = "0";
+  filterLabel.textContent = "Rank";
+  const filterSel = document.createElement("select");
+  const opts = [
+    { v: "all", t: "All" },
+    { v: "easy", t: "Easy" },
+    { v: "normal", t: "Normal" },
+    { v: "hard", t: "Hard" },
+    { v: "elite", t: "Elite" },
+    { v: "legendary", t: "Legendary" },
+  ];
+  for (const o of opts) {
+    const opt = document.createElement("option");
+    opt.value = o.v;
+    opt.textContent = o.t;
+    filterSel.appendChild(opt);
+  }
+  filterSel.value = String(questRankFilter || "all");
+  filterSel.addEventListener("change", () => {
+    questRankFilter = String(filterSel.value || "all");
+    questPage = 0;
+    renderQuestList();
+  });
+  filterRow.appendChild(filterLabel);
+  filterRow.appendChild(filterSel);
+  questListEl.appendChild(filterRow);
 
   const completedM = state.completed?.missions || {};
   const completedS = state.completed?.side || {};
@@ -8224,12 +10661,31 @@ function renderQuestList() {
     return !completedS[q.id];
   });
 
-  const total = filtered.length;
+  const toRank = (q) => {
+    if (!q) return "";
+    if (q.kind === "mission") return String(q.difficulty || "").trim().toLowerCase();
+    if (q.kind === "side") {
+      const lvl = Math.max(1, Math.floor(q.minLevel || 1));
+      const tier = Math.max(1, Math.min(5, 1 + Math.floor((lvl - 1) / 4)));
+      if (tier <= 1) return "easy";
+      if (tier === 2) return "normal";
+      if (tier === 3) return "hard";
+      if (tier === 4) return "elite";
+      return "legendary";
+    }
+    return "";
+  };
+  const rf = String(questRankFilter || "all");
+  const filteredByRank = (rf && rf !== "all")
+    ? filtered.filter((q) => toRank(q) === rf)
+    : filtered;
+
+  const total = filteredByRank.length;
   const maxPage = Math.max(0, Math.ceil(total / QUESTS_PER_PAGE) - 1);
   questPage = clamp(questPage, 0, maxPage);
   const start = questPage * QUESTS_PER_PAGE;
   const end = Math.min(total, start + QUESTS_PER_PAGE);
-  const toShow = filtered.slice(start, end);
+  const toShow = filteredByRank.slice(start, end);
 
   if (questPageInfo) {
     const label = (activeTab === "missions") ? "Missions" : "Side Quests";
@@ -8237,6 +10693,8 @@ function renderQuestList() {
   }
   if (btnPrevQuest) btnPrevQuest.disabled = questPage <= 0;
   if (btnNextQuest) btnNextQuest.disabled = questPage >= maxPage;
+
+  const isRested = !!(state && typeof hasEffectOnState === 'function' && hasEffectOnState(state, "rested"));
 
   for (const q of toShow) {
     const item = document.createElement("div");
@@ -8276,7 +10734,18 @@ function renderQuestList() {
     const btn = document.createElement("button");
     btn.textContent = done ? (isAdminProfile(state.profile) ? "Replay" : "Done") : (gate.ok ? "Accept" : "Locked");
     if (!gate.ok || (done && !isAdminProfile(state.profile))) btn.disabled = true;
-    btn.addEventListener("click", () => startQuest(q));
+    else if (isRested) {
+      btn.disabled = true;
+      btn.title = "Resting... wait until rested ends";
+    }
+    btn.addEventListener("click", () => {
+      if (isRested) {
+        appendLog("You are resting. All actions paused until rested ends.");
+        render();
+        return;
+      }
+      startQuest(q);
+    });
     row.appendChild(btn);
 
     if (!gate.ok && !(done && !isAdminProfile(state.profile))) {
@@ -8289,14 +10758,157 @@ function renderQuestList() {
     item.appendChild(row);
     questListEl.appendChild(item);
   }
+  if (isRested) {
+    const hint = document.createElement("div");
+    hint.className = "hint";
+    hint.style.color = "#2ad37b";
+    hint.style.fontWeight = "700";
+    hint.style.marginTop = "8px";
+    try {
+      const eff = state.effects && state.effects.rested;
+      const sec = eff && typeof eff.expiresAt === 'number' ? Math.max(0, Math.ceil((eff.expiresAt - Date.now())/1000)) : 0;
+      hint.textContent = "💤 Resting... Quest Accept paused for " + sec + "s.";
+    } catch { hint.textContent = "💤 Resting..."; }
+    questListEl.appendChild(hint);
+  }
+}
+
+let marketSearchQuery = "";
+let marketSearchInputEl = null;
+let marketSearchWrapEl = null;
+let marketSearchResultsEl = null;
+let marketSearchDebounce = null;
+
+function ensureMarketSearchUi() {
+  if (!questListEl) return;
+  if (marketSearchWrapEl && !marketSearchWrapEl.isConnected) {
+    marketSearchWrapEl = null;
+    marketSearchInputEl = null;
+    marketSearchResultsEl = null;
+    marketRankSelectEl = null;
+  }
+  if (marketSearchWrapEl) return;
+
+  questListEl.innerHTML = "";
+
+  marketSearchWrapEl = document.createElement("div");
+  marketSearchWrapEl.id = "marketSearchWrap";
+  marketSearchWrapEl.style.display = "flex";
+  marketSearchWrapEl.style.flexDirection = "column";
+  marketSearchWrapEl.style.gap = "10px";
+
+  const headerHint = document.createElement("div");
+  headerHint.className = "hint";
+  headerHint.style.marginTop = "0";
+  headerHint.style.fontWeight = "600";
+  headerHint.textContent = "🛒 Shop Board — Search items + filter by Ranking (Common→Legendary→Curio). Title switches from Quest Board to Shop Board when in Market node.";
+  marketSearchWrapEl.appendChild(headerHint);
+
+  const row = document.createElement("div");
+  row.className = "row";
+  row.style.alignItems = "center";
+  row.style.flexWrap = "wrap";
+
+  marketSearchInputEl = document.createElement("input");
+  marketSearchInputEl.placeholder = "Search Shop... (name or key)";
+  marketSearchInputEl.value = String(marketSearchQuery || "");
+  marketSearchInputEl.autocomplete = "off";
+  marketSearchInputEl.spellcheck = false;
+  marketSearchInputEl.style.flex = "1";
+  marketSearchInputEl.style.minWidth = "180px";
+  marketSearchInputEl.addEventListener("input", () => {
+    marketSearchQuery = String(marketSearchInputEl?.value || "");
+    marketPage = 0;
+    if (marketSearchDebounce) clearTimeout(marketSearchDebounce);
+    marketSearchDebounce = setTimeout(() => {
+      renderMarketList();
+    }, 90);
+  });
+
+  // Rank filter for shop - ensures shop board feature has rank filter
+  const rankLabel = document.createElement("div");
+  rankLabel.className = "hint";
+  rankLabel.textContent = "Rank";
+  rankLabel.style.marginLeft = "8px";
+  rankLabel.title = "Filter shop items by item ranking";
+
+  marketRankSelectEl = document.createElement("select");
+  marketRankSelectEl.title = "Filter by item Rank: Common, Uncommon, Rare, Epic, Legendary, Curio";
+  const rankOpts = [
+    { v: "all", t: "All Ranks" },
+    { v: "common", t: "Common" },
+    { v: "uncommon", t: "Uncommon" },
+    { v: "rare", t: "Rare" },
+    { v: "epic", t: "Epic" },
+    { v: "legendary", t: "Legendary" },
+    { v: "curio", t: "Curio" }
+  ];
+  for (const o of rankOpts) {
+    const opt = document.createElement("option");
+    opt.value = o.v;
+    opt.textContent = o.t;
+    marketRankSelectEl.appendChild(opt);
+  }
+  marketRankSelectEl.value = String(marketRankFilter || "all");
+  marketRankSelectEl.style.minWidth = "132px";
+  marketRankSelectEl.addEventListener("change", () => {
+    marketRankFilter = String(marketRankSelectEl.value || "all");
+    marketPage = 0;
+    renderMarketList();
+  });
+
+  row.appendChild(marketSearchInputEl);
+  row.appendChild(rankLabel);
+  row.appendChild(marketRankSelectEl);
+  marketSearchWrapEl.appendChild(row);
+
+  marketSearchResultsEl = document.createElement("div");
+  marketSearchResultsEl.id = "marketSearchResults";
+  marketSearchResultsEl.style.display = "flex";
+  marketSearchResultsEl.style.flexDirection = "column";
+  marketSearchResultsEl.style.gap = "10px";
+  marketSearchWrapEl.appendChild(marketSearchResultsEl);
+
+  questListEl.appendChild(marketSearchWrapEl);
 }
 
 function renderMarketList() {
-  questListEl.innerHTML = "";
   if (!state) return;
   normalizeState(state);
 
-  const keys = marketStockKeys();
+  // Ensure board title is Shop Board when in market - core shop board feature
+  if (typeof updateQuestBoardTitle === 'function') updateQuestBoardTitle();
+
+  ensureMarketSearchUi();
+  if (!marketSearchResultsEl) return;
+  if (marketRankSelectEl) marketRankSelectEl.value = String(marketRankFilter || "all");
+  marketSearchResultsEl.innerHTML = "";
+
+  const allKeys = marketStockKeys();
+
+  // Filter by rank first - shop rank filter feature
+  const rf = String(marketRankFilter || "all").toLowerCase();
+  let rankFiltered = allKeys;
+  if (rf && rf !== "all") {
+    rankFiltered = allKeys.filter((k) => {
+      try {
+        const r = marketRankForItem(k);
+        return String(r.rank || "").toLowerCase() === rf;
+      } catch { return false; }
+    });
+  }
+
+  const q = String(marketSearchQuery || "").trim().toLowerCase();
+  const keys = q
+    ? rankFiltered.filter((k) => {
+      const kk = String(k || "").toLowerCase();
+      if (!kk) return false;
+      if (kk.includes(q)) return true;
+      const label = String(itemLabel(k) || "").toLowerCase();
+      return label.includes(q);
+    })
+    : rankFiltered;
+
   const total = keys.length;
   const maxPage = Math.max(0, Math.ceil(total / MARKET_ITEMS_PER_PAGE) - 1);
   marketPage = clamp(marketPage, 0, maxPage);
@@ -8305,11 +10917,25 @@ function renderMarketList() {
     const start = marketPage * MARKET_ITEMS_PER_PAGE;
     const end = Math.min(total, start + MARKET_ITEMS_PER_PAGE);
     questPageInfo.textContent = total === 0
-      ? "Market: no items"
-      : `Market: ${start + 1}-${end} of ${total}`;
+      ? "Shop: no items (check rank filter)"
+      : `Shop: ${start + 1}-${end} of ${total} [${rf === 'all' ? 'All Ranks' : rf}]`;
   }
   if (btnPrevQuest) btnPrevQuest.disabled = marketPage <= 0;
   if (btnNextQuest) btnNextQuest.disabled = marketPage >= maxPage;
+
+  const isRested = !!(state && typeof hasEffectOnState === 'function' && hasEffectOnState(state, "rested"));
+  if (isRested) {
+    const restHint = document.createElement("div");
+    restHint.className = "hint";
+    restHint.style.color = "#2ad37b";
+    restHint.style.fontWeight = "700";
+    try {
+      const eff = state.effects && state.effects.rested;
+      const sec = eff && typeof eff.expiresAt === 'number' ? Math.max(0, Math.ceil((eff.expiresAt - Date.now())/1000)) : 0;
+      restHint.textContent = "💤 Resting... Shop purchases paused for " + sec + "s. Wait to buy.";
+    } catch { restHint.textContent = "💤 Resting... Shop paused."; }
+    marketSearchResultsEl.appendChild(restHint);
+  }
 
   for (const k of keys.slice(marketPage * MARKET_ITEMS_PER_PAGE, marketPage * MARKET_ITEMS_PER_PAGE + MARKET_ITEMS_PER_PAGE)) {
     const def = itemDef(k);
@@ -8318,8 +10944,11 @@ function renderMarketList() {
     const owned = Math.max(0, Math.floor(state.inventory?.[k] || 0));
 
     const item = document.createElement("div");
-    item.className = "questItem";
-    item.style.cursor = "pointer";
+    item.className = "questItem shopItem";
+    item.dataset.rank = r.rank;
+    item.dataset.key = k;
+    item.style.cursor = isRested ? "not-allowed" : "pointer";
+    if (isRested) item.style.opacity = "0.55";
 
     const top = document.createElement("div");
     top.className = "questTop";
@@ -8337,20 +10966,36 @@ function renderMarketList() {
 
     const meta = document.createElement("div");
     meta.className = "questMeta";
-    meta.textContent = `Price: ${price} gold | Owned: ${owned}`;
+    meta.textContent = `Price: ${price} gold | Owned: ${owned} | Rank: ${r.rank}`;
     item.appendChild(meta);
 
     if (!isAdminProfile(state.profile) && (state.gold || 0) < price) {
-      item.style.opacity = "0.6";
+      item.style.opacity = isRested ? "0.45" : "0.6";
     }
 
     item.addEventListener("click", () => {
+      if (isRested) {
+        appendLog("You are resting. Shop purchases paused until rested ends.");
+        render();
+        return;
+      }
       openMarketItemModal(k);
     });
 
-    questListEl.appendChild(item);
+    marketSearchResultsEl.appendChild(item);
+  }
+  // If no items after filter, show help
+  if (marketSearchResultsEl.children.length === 0 || (marketSearchResultsEl.children.length === 1 && isRested)) {
+    if (!isRested || marketSearchResultsEl.children.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "hint";
+      empty.textContent = rf === 'all' && !q ? "No items found." : `No items match: search='${q||''}' rank='${rf}'. Try All Ranks or clear search.`;
+      empty.style.marginTop = "8px";
+      marketSearchResultsEl.appendChild(empty);
+    }
   }
 }
+
 
 function setTabUi() {
   if (activeTab === "missions") {
@@ -8414,6 +11059,13 @@ function normalizeState(s) {
     if (!m.profession) m.profession = "fighter";
     if (!m.build) m.build = "balanced";
 
+    if (typeof m.xp !== "number" || !Number.isFinite(m.xp)) m.xp = 0;
+    m.skills = m.skills || {};
+    m.skills.learned = m.skills.learned || {};
+    if (!m.skills.sources || typeof m.skills.sources !== "object") m.skills.sources = {};
+    if (!m.flags || typeof m.flags !== "object") m.flags = {};
+    if (typeof ensureCompanionStarterSkills === "function") ensureCompanionStarterSkills(m);
+
     const wasDead = (m.hp || 0) <= 0;
     const hpPct = (m.maxHp || 0) > 0 ? clamp((m.hp || 0) / (m.maxHp || 1), 0, 1) : 1;
     const manaPct = (m.maxMana || 0) > 0 ? clamp((m.mana || 0) / (m.maxMana || 1), 0, 1) : 1;
@@ -8428,9 +11080,19 @@ function normalizeState(s) {
   s.skills = s.skills || {};
   s.skills.learned = s.skills.learned || {};
   if (!s.skills.sources || typeof s.skills.sources !== "object") s.skills.sources = {};
+  for (const k of Object.keys(s.skills.learned)) {
+    if (!s.skills.learned[k]) continue;
+    s.skills.learned[k] = Math.min(7, Math.max(1, Math.floor(s.skills.learned[k] || 1)));
+  }
   if (typeof s.skills.page !== "number") s.skills.page = 0;
   if (!Array.isArray(s.skills.draftQueue)) s.skills.draftQueue = [];
   if (typeof s.skills.draft === "undefined") s.skills.draft = null;
+
+  if (!s.flags.skillDedupe20260120a && typeof dedupeLearnedSkillsByBaseLabel === "function") {
+    const did = dedupeLearnedSkillsByBaseLabel(s);
+    s.flags.skillDedupe20260120a = true;
+    if (did && typeof autoSave === "function" && typeof state !== "undefined" && s === state) autoSave();
+  }
   s.world = s.world || { turn: 0, day: 1, weather: "Clear" };
   if (typeof s.world.pendingEvent === "undefined") s.world.pendingEvent = null;
   if (typeof s.world.news === "undefined") s.world.news = null;
@@ -8530,7 +11192,7 @@ function continueProfile() {
       renderHomeSaves();
       return;
     }
-    ensureAdminAccount(true);
+    if (typeof ensureAdminAccount === "function") ensureAdminAccount(true);
     try {
       localStorage.removeItem(`virelia_admin_deleted:${ADMIN_PROFILE}`);
     } catch {
@@ -8554,20 +11216,32 @@ function continueProfile() {
   state = loaded;
   state.updatedAt = nowIso();
   normalizeState(state);
-  if (!state.missions || state.missions.length !== MISSION_COUNT) state.missions = genMissions(MISSION_COUNT);
-  if (!state.sideQuests || state.sideQuests.length !== SIDE_QUEST_COUNT) state.sideQuests = genSideQuests(SIDE_QUEST_COUNT);
+  const exileSeed = (!!state.flags?.["exile:active"] && typeof state.flags?.["exile:seed"] === "number")
+    ? (state.flags["exile:seed"] >>> 0)
+    : 0;
+  if (!state.missions || state.missions.length !== MISSION_COUNT || exileSeed) state.missions = genMissions(MISSION_COUNT, exileSeed);
+  if (!state.sideQuests || state.sideQuests.length !== SIDE_QUEST_COUNT || exileSeed) state.sideQuests = genSideQuests(SIDE_QUEST_COUNT, exileSeed);
   appendLog("⏳ Continued your journey.");
   setHomeMsg(`Continued as ${profile}.`);
   setTabUi();
   render();
   renderHomeSaves();
-  const nid = state.nodeId || "crossroads";
-  const inCreation = nid === "character_create" || nid === "character_build";
+  let nid = state.nodeId || "crossroads";
+  let inCreation = nid === "character_create" || nid === "character_build";
   if (!state.character?.created && !inCreation) {
-    if (!state.character.profession) state.character.profession = "fighter";
-    if (!state.character.build) state.character.build = "balanced";
-    state.character.created = true;
-    appendLog("Your save was from an older version. Assigned a default class/build.");
+    if (profile === ADMIN_PROFILE) {
+      adminShowGame = true;
+      setAdminDashboardUi();
+      state.nodeId = "character_create";
+      nid = "character_create";
+      inCreation = true;
+      appendLog("Admin profile setup: choose your profession and build.");
+    } else {
+      if (!state.character.profession) state.character.profession = "fighter";
+      if (!state.character.build) state.character.build = "balanced";
+      state.character.created = true;
+      appendLog("Your save was from an older version. Assigned a default class/build.");
+    }
   }
   enterNode(nid);
 }
@@ -8583,18 +11257,21 @@ function resetProfile() {
       setHomeMsg("Incorrect admin password.");
       return;
     }
-    try {
-      localStorage.removeItem(saveKey(ADMIN_PROFILE));
-      localStorage.setItem(`virelia_admin_deleted:${ADMIN_PROFILE}`, "1");
-    } catch {
-    }
-    if (state && state.profile === ADMIN_PROFILE) state = null;
-    adminMode = false;
+    const s = createNewState(ADMIN_PROFILE);
+    s.nodeId = "character_create";
+    s.character = { profession: null, build: null, created: false };
+    s.updatedAt = nowIso();
+    safeSave(ADMIN_PROFILE, s);
+    state = s;
+    adminMode = true;
     adminEditingProfile = null;
     adminShowGame = true;
     setAdminDashboardUi();
-    setHomeMsg("Admin profile deleted.");
+    setHomeMsg("Admin save reset.");
+    setTabUi();
+    render();
     renderHomeSaves();
+    enterNode("character_create");
     return;
   }
   safeDelete(profile);
@@ -8624,7 +11301,7 @@ function purgeAllNonAdminSaves() {
     questListEl.innerHTML = "";
     renderEffectsUi();
   }
-  ensureAdminAccount(true);
+  if (typeof ensureAdminAccount === "function") ensureAdminAccount(true);
   setHomeMsg("Deleted all saves except admin#.");
   renderHomeSaves();
 }
@@ -8688,6 +11365,7 @@ function doRest() {
   }
   state.mana = Math.min(playerMaxMana(), state.mana + 8);
   clearEffect("bleeding");
+  clearEffect("poisoned");
   addEffect("rested", 15000);
   appendLog("You rest. The city noise fades, and your breath steadies.");
   render();
@@ -8882,6 +11560,135 @@ function showInventory() {
   renderQuestList();
 }
 
+function showParty(msg) {
+  if (!state) return;
+  if (guardLevelUpDraft()) return;
+  normalizeState(state);
+  syncSidebarButtons();
+
+  const members = Array.isArray(state.party?.members) ? state.party.members : [];
+  const selectedId = String(state.party?.viewId || "");
+  const selected = selectedId ? (members.find((m) => m && m.id === selectedId) || null) : (members[0] || null);
+  if (selected && selected.id && state.party) state.party.viewId = selected.id;
+
+  outputEl.innerHTML = "";
+  if (questListEl) questListEl.innerHTML = "";
+
+  const header = document.createElement("div");
+  header.className = "line";
+  header.textContent = "Party";
+  outputEl.appendChild(header);
+
+  if (msg) {
+    const m = document.createElement("div");
+    m.className = "line";
+    m.textContent = msg;
+    outputEl.appendChild(m);
+  }
+
+  const hint = document.createElement("div");
+  hint.className = "hint";
+  hint.textContent = `Party size: ${partySize(state)} (max 4). Companions gain XP and can learn more techniques as they level.`;
+  outputEl.appendChild(hint);
+
+  if (!members.length) {
+    const none = document.createElement("div");
+    none.className = "hint";
+    none.textContent = "(No companions yet. Visit the Tavern to recruit.)";
+    outputEl.appendChild(none);
+  } else {
+    const list = document.createElement("div");
+    list.className = "skillList";
+    for (const c of members) {
+      if (!c) continue;
+      const p = professionDef(c.profession);
+      const b = buildDef(c.build);
+
+      const row = document.createElement("div");
+      row.className = "skillRow";
+      row.style.cursor = "pointer";
+      if (selected && selected.id === c.id) row.style.borderColor = "#3a5a86";
+      row.addEventListener("click", () => {
+        state.party.viewId = c.id;
+        showParty();
+      });
+
+      const left = document.createElement("div");
+      left.className = "skillLeft";
+      const title = document.createElement("div");
+      title.className = "skillTitle";
+      title.textContent = c.name || "Companion";
+      const meta = document.createElement("div");
+      meta.className = "skillMeta";
+      meta.textContent = `${p ? p.label : titleCaseWord(c.profession)} / ${b ? b.label : titleCaseWord(c.build)} • Lv ${c.level} • XP ${c.xp || 0}/${xpToNext(c.level || 1)} • HP ${c.hp}/${c.maxHp} • Mana ${c.mana}/${c.maxMana}`;
+      left.appendChild(title);
+      left.appendChild(meta);
+
+      const right = document.createElement("div");
+      right.className = "skillActions";
+      const btnView = document.createElement("button");
+      btnView.className = "secondary";
+      btnView.textContent = "View";
+      btnView.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        state.party.viewId = c.id;
+        showParty();
+      });
+      right.appendChild(btnView);
+
+      row.appendChild(left);
+      row.appendChild(right);
+      list.appendChild(row);
+    }
+    outputEl.appendChild(list);
+
+    if (selected) {
+      const p = professionDef(selected.profession);
+      const b = buildDef(selected.build);
+      const st = selected.stats || { strength: 0, cunning: 0, arcana: 0, resilience: 0 };
+      const learned = selected.skills?.learned || {};
+      const learnedKeys = Object.keys(learned).filter((k) => !!learned[k]);
+      learnedKeys.sort((a, bb) => String(skillDef(a)?.label || a).localeCompare(String(skillDef(bb)?.label || bb)));
+      const skillsLine = learnedKeys.length
+        ? learnedKeys.map((k) => {
+          const def = skillDef(k);
+          const rank = Math.max(1, Math.floor(learned[k] || 1));
+          return `${def.label} (Lv ${rank})`;
+        }).join(", ")
+        : "None";
+
+      const detailHeader = document.createElement("div");
+      detailHeader.className = "line";
+      detailHeader.textContent = `Details: ${selected.name}`;
+      outputEl.appendChild(detailHeader);
+
+      const detail = document.createElement("div");
+      detail.className = "hint";
+      detail.style.whiteSpace = "pre-wrap";
+      detail.textContent = [
+        `Class: ${p ? p.label : titleCaseWord(selected.profession)} / ${b ? b.label : titleCaseWord(selected.build)}`,
+        `Level: ${selected.level || 1}`,
+        `XP: ${selected.xp || 0}/${xpToNext(selected.level || 1)}`,
+        `HP: ${selected.hp}/${selected.maxHp} | Mana: ${selected.mana}/${selected.maxMana}`,
+        `Strength: ${st.strength || 0}`,
+        `Cunning: ${st.cunning || 0}`,
+        `Arcana: ${st.arcana || 0}`,
+        `Resilience: ${st.resilience || 0}`,
+        `Skills/Spells: ${skillsLine}`,
+      ].join("\n");
+      outputEl.appendChild(detail);
+    }
+  }
+
+  showChoices([
+    { label: "Back", className: "secondary", onChoose: () => enterNode(state.nodeId || "crossroads") },
+  ]);
+
+  outputEl.scrollTop = 0;
+  renderStats();
+}
+
 function spendSkill(key) {
   if (!state) return;
   normalizeState(state);
@@ -8907,15 +11714,24 @@ function learnSkill(skillKey) {
     showSkills("Already learned.");
     return;
   }
+  if (typeof canLearnSkillByBaseLabel === "function" && !canLearnSkillByBaseLabel(state, k)) {
+    showSkills("You already know a stronger version of that skill.");
+    return;
+  }
   if ((state.skillPoints || 0) <= 0) {
     showSkills("No skill points.");
     return;
   }
   state.skillPoints -= 1;
-  state.skills.learned[k] = 1;
   const def = skillDef(k);
   state.skills.sources = (state.skills.sources && typeof state.skills.sources === "object") ? state.skills.sources : {};
-  if (!state.skills.sources[k]) state.skills.sources[k] = skillSourceForKey(state, k, def);
+  const src = state.skills.sources[k] || skillSourceForKey(state, k, def);
+  if (typeof replaceLearnedSkillByBaseLabel === "function") {
+    replaceLearnedSkillByBaseLabel(state, k, 1, src);
+  } else {
+    state.skills.learned[k] = 1;
+    if (!state.skills.sources[k]) state.skills.sources[k] = src;
+  }
   playChirp([520, 780, 1040], 180, "triangle", 0.055, 0);
   autoSave();
   showSkills(`Learned: ${def.label}.`);
@@ -8927,11 +11743,13 @@ function upgradeLearnedSkill(skillKey) {
   const k = String(skillKey || "").trim();
   if (!k) return false;
   if (!state.skills?.learned?.[k]) return false;
+  const curRank = Math.max(1, Math.floor(state.skills.learned[k] || 1));
+  if (curRank >= 7) return false;
   const def = skillDef(k);
   const cost = skillPointCost(def);
   if ((state.skillPoints || 0) < cost) return false;
   state.skillPoints -= cost;
-  state.skills.learned[k] = Math.max(1, Math.floor(state.skills.learned[k] || 1)) + 1;
+  state.skills.learned[k] = Math.min(7, Math.max(1, Math.floor(state.skills.learned[k] || 1)) + 1);
   autoSave();
   return true;
 }
@@ -8942,6 +11760,15 @@ function showSkills(msg) {
   normalizeState(state);
   syncSidebarButtons();
 
+  const wasSkillsView = !!(outputEl && outputEl.querySelector && outputEl.querySelector(".skillList"));
+  const prevScrollTop = wasSkillsView ? (outputEl.scrollTop || 0) : 0;
+
+  if (!state.character?.created || !state.character?.profession || !state.character?.build) {
+    appendLog("Choose your profession and build first.");
+    enterNode("character_create");
+    return;
+  }
+
   const profKey = state.character?.profession || "fighter";
   const buildKey = state.character?.build || "balanced";
   const p = professionDef(profKey);
@@ -8949,11 +11776,18 @@ function showSkills(msg) {
   const pLabel = p ? p.label : titleCaseWord(profKey);
   const bLabel = b ? b.label : titleCaseWord(buildKey);
 
-  const total = SKILLS_PER_COMBO;
+  const ownedOnly = !!state.skills.ownedOnly;
+  const allDefs = [];
+  for (let i = 1; i <= SKILLS_PER_COMBO; i++) allDefs.push(skillDefFromParts(profKey, buildKey, i));
+  const filteredDefs = ownedOnly
+    ? allDefs.filter((d) => !!state.skills.learned[d.key])
+    : allDefs;
+
+  const total = filteredDefs.length;
   const maxPage = Math.max(0, Math.ceil(total / SKILLS_PER_PAGE) - 1);
   state.skills.page = clamp(state.skills.page || 0, 0, maxPage);
-  const start = state.skills.page * SKILLS_PER_PAGE + 1;
-  const end = Math.min(total, start + SKILLS_PER_PAGE - 1);
+  const startIdx = state.skills.page * SKILLS_PER_PAGE;
+  const endIdx = Math.min(total, startIdx + SKILLS_PER_PAGE);
 
   outputEl.innerHTML = "";
 
@@ -8987,13 +11821,32 @@ function showSkills(msg) {
 
   const pager = document.createElement("div");
   pager.className = "line";
-  pager.textContent = `Skillbook: ${start}-${end} of ${total}`;
+  pager.textContent = total === 0
+    ? (ownedOnly ? "Owned skills: none" : "Skillbook: none")
+    : (ownedOnly
+      ? `Owned skills: ${startIdx + 1}-${endIdx} of ${total}`
+      : `Skillbook: ${startIdx + 1}-${endIdx} of ${total}`);
   outputEl.appendChild(pager);
+
+  const filterRow = document.createElement("div");
+  filterRow.className = "row";
+  const btnFilter = document.createElement("button");
+  btnFilter.className = "secondary";
+  btnFilter.textContent = ownedOnly ? "Showing: Owned" : "Showing: All";
+  btnFilter.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    state.skills.ownedOnly = !state.skills.ownedOnly;
+    state.skills.page = 0;
+    autoSave();
+    showSkills("", { resetScroll: true });
+  });
+  filterRow.appendChild(btnFilter);
+  outputEl.appendChild(filterRow);
 
   const list = document.createElement("div");
   list.className = "skillList";
-  for (let i = start; i <= end; i++) {
-    const def = skillDefFromParts(profKey, buildKey, i);
+  for (const def of filteredDefs.slice(startIdx, endIdx)) {
     const learned = !!state.skills.learned[def.key];
     const rank = Math.max(0, Math.floor(state.skills.learned[def.key] || 0));
 
@@ -9038,11 +11891,18 @@ function showSkills(msg) {
     btnUpgrade.textContent = "Upgrade";
     btnUpgrade.style.display = learned ? "inline-block" : "none";
     const upCost = skillPointCost(def);
-    btnUpgrade.title = `Upgrade this skill (-${upCost} Skill Points)`;
-    btnUpgrade.disabled = !learned || (state.skillPoints || 0) < upCost;
+    const atCap = learned && Math.max(1, rank) >= 7;
+    btnUpgrade.title = atCap
+      ? "Max level reached (Lv 7). Find a higher-tier version from a Skill Trader or level-up reward."
+      : `Upgrade this skill (-${upCost} Skill Points)`;
+    btnUpgrade.disabled = !learned || atCap || (state.skillPoints || 0) < upCost;
     btnUpgrade.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
+      if (Math.max(1, Math.floor(state.skills.learned[def.key] || 1)) >= 7) {
+        showSkills("Max level reached (Lv 7). Find a higher-tier version from a Skill Trader or level-up reward.");
+        return;
+      }
       const ok = upgradeLearnedSkill(def.key);
       if (!ok) {
         showSkills("Not enough Skill Points.");
@@ -9063,8 +11923,8 @@ function showSkills(msg) {
   outputEl.appendChild(list);
 
   showChoices([
-    { label: "Prev Page", className: "secondary", onChoose: () => { state.skills.page = Math.max(0, (state.skills.page || 0) - 1); showSkills(); } },
-    { label: "Next Page", className: "secondary", onChoose: () => { state.skills.page = Math.min(maxPage, (state.skills.page || 0) + 1); showSkills(); } },
+    { label: "Prev Page", className: "secondary", onChoose: () => { state.skills.page = Math.max(0, (state.skills.page || 0) - 1); showSkills("", { resetScroll: true }); } },
+    { label: "Next Page", className: "secondary", onChoose: () => { state.skills.page = Math.min(maxPage, (state.skills.page || 0) + 1); showSkills("", { resetScroll: true }); } },
     { label: "+ Strength", onChoose: () => spendSkill("strength") },
     { label: "+ Cunning", onChoose: () => spendSkill("cunning") },
     { label: "+ Arcana", onChoose: () => spendSkill("arcana") },
@@ -9072,7 +11932,8 @@ function showSkills(msg) {
     { label: "Back", className: "secondary", onChoose: () => enterNode(state.nodeId || "crossroads") },
   ]);
 
-  outputEl.scrollTop = 0;
+  const resetScroll = !!(arguments.length > 1 && arguments[1] && arguments[1].resetScroll);
+  outputEl.scrollTop = resetScroll ? 0 : prevScrollTop;
   renderStats();
   renderQuestList();
 }
@@ -9092,7 +11953,51 @@ function showAchievements() {
 function init() {
   if (!btnNew) return;
 
-  ensureAdminAccount();
+  if (typeof ensureAdminAccount === "function") ensureAdminAccount();
+
+  const href = document.querySelector('link[href*="style.css"]')?.getAttribute("href") || "";
+  const m = /[?&]v=([^&]+)/.exec(href);
+  const buildV = m ? m[1] : "dev";
+  if (!document.getElementById("buildBadge")) {
+    const badge = document.createElement("div");
+    badge.id = "buildBadge";
+    badge.className = "buildBadge";
+    badge.textContent = `Build ${buildV}`;
+    document.body.appendChild(badge);
+  }
+  window.vireliaSanityCheck = () => {
+    const s = state;
+    const inCombat = !!s?.world?.pendingEvent && s.world.pendingEvent.kind === "combat" && s.world.pendingEvent.stage === "combat";
+    const phoenixInCatalog = (() => {
+      try {
+        const d = itemDef("phoenix_feather");
+        return !!d && !!d.consumable;
+      } catch {
+        return false;
+      }
+    })();
+    const result = {
+      build: buildV,
+      ui: {
+        cssLoaded: /\bstyle\.css\?v=/.test(href),
+        hasModalCss: !!document.querySelector(".modalOverlay"),
+      },
+      features: {
+        targetedItemUse: typeof useItem === "function" && useItem.length >= 3,
+        restoreManaPartyTarget: typeof restoreManaPartyTarget === "function",
+        combatItemTargeting: typeof combatPlayerAction === "function",
+        companionScaling: typeof computeCompanionSheet === "function",
+        companionAutoUse: typeof companionAiAct === "function",
+        phoenixFeather: phoenixInCatalog,
+      },
+      runtime: {
+        profile: s?.profile || null,
+        inCombat,
+      },
+    };
+    console.log("Virelia sanity check", result);
+    return result;
+  };
 
   btnNew.addEventListener("click", startNewProfile);
   btnContinue.addEventListener("click", continueProfile);
@@ -9117,8 +12022,8 @@ function init() {
   btnStatus.addEventListener("click", doStatus);
   if (btnInventory) btnInventory.addEventListener("click", () => { worldTick("Inventory"); clearLog(); showInventory(); autoSave(); });
   if (btnSkills) btnSkills.addEventListener("click", () => { worldTick("Skills"); clearLog(); showSkills(); autoSave(); });
+  if (typeof btnParty !== "undefined" && btnParty) btnParty.addEventListener("click", () => { worldTick("Party"); clearLog(); showParty(); autoSave(); });
   if (btnAchievements) btnAchievements.addEventListener("click", () => { worldTick("Achievements"); clearLog(); showAchievements(); autoSave(); });
-  if (btnDesign) btnDesign.addEventListener("click", () => { worldTick("Design"); clearLog(); showDesign(); autoSave(); });
   btnSave.addEventListener("click", doSave);
 
   tabMissions.addEventListener("click", () => { worldTick("Tab: Missions"); clearLog(); activeTab = "missions"; questPage = 0; setTabUi(); render(); });
@@ -9155,225 +12060,3008 @@ function init() {
   }, 500);
 }
 
-function showDesign() {
-  if (!state) return;
-  if (guardLevelUpDraft()) return;
-  normalizeState(state);
-  syncSidebarButtons();
-
-  // Clear the output and choices panels like dialog panel
-  outputEl.innerHTML = "";
-  choicesEl.innerHTML = "";
-  if (questListEl) questListEl.innerHTML = "";
-
-  // Add header
-  const header = document.createElement("div");
-  header.className = "line";
-  header.textContent = "Design Actions";
-  outputEl.appendChild(header);
-
-  // Add description
-  const body = document.createElement("div");
-  body.className = "hint";
-  body.style.whiteSpace = "pre-wrap";
-  body.textContent = "Choose an action to modify your character design and appearance.";
-  outputEl.appendChild(body);
-
-  // Show action choices like dialog panel
-  showChoices([
-    { label: "Change Character Name", onChoose: () => designAction("changeName") },
-    { label: "Customize Appearance", className: "secondary", onChoose: () => designAction("customizeAppearance") },
-    { label: "Select Title", className: "secondary", onChoose: () => designAction("selectTitle") },
-    { label: "Modify Background", className: "secondary", onChoose: () => designAction("modifyBackground") },
-    { label: "Reset Design", className: "danger", onChoose: () => designAction("resetDesign") },
-    { label: "Back", className: "secondary", onChoose: () => { render(); } }
-  ]);
-
-  outputEl.scrollTop = 0;
-  renderStats();
-}
-
-function designAction(action) {
-  if (!state) return;
-  
-  // Clear and show action-specific content
-  outputEl.innerHTML = "";
-  choicesEl.innerHTML = "";
-  if (questListEl) questListEl.innerHTML = "";
-
-  const header = document.createElement("div");
-  header.className = "line";
-  
-  let actionChoices = [];
-
-  switch(action) {
-    case "changeName":
-      header.textContent = "Change Character Name";
-      
-      const nameBody = document.createElement("div");
-      nameBody.className = "hint";
-      nameBody.style.whiteSpace = "pre-wrap";
-      nameBody.textContent = `Current name: ${state.profile || "Unknown"}\n\nChoose a new name for your character:`;
-      outputEl.appendChild(nameBody);
-      
-      actionChoices = [
-        { label: "Enter Custom Name", onChoose: () => promptForName() },
-        { label: "Random Name", className: "secondary", onChoose: () => generateRandomName() },
-        { label: "Back", className: "secondary", onChoose: () => showDesign() }
-      ];
-      break;
-      
-    case "customizeAppearance":
-      header.textContent = "Customize Appearance";
-      
-      const appearanceBody = document.createElement("div");
-      appearanceBody.className = "hint";
-      appearanceBody.style.whiteSpace = "pre-wrap";
-      appearanceBody.textContent = "Customize your character's visual appearance and style.";
-      outputEl.appendChild(appearanceBody);
-      
-      actionChoices = [
-        { label: "Change Hair Style", onChoose: () => designAction("changeHair") },
-        { label: "Change Eye Color", className: "secondary", onChoose: () => designAction("changeEyes") },
-        { label: "Change Skin Tone", className: "secondary", onChoose: () => designAction("changeSkin") },
-        { label: "Change Outfit", className: "secondary", onChoose: () => designAction("changeOutfit") },
-        { label: "Back", className: "secondary", onChoose: () => showDesign() }
-      ];
-      break;
-      
-    case "selectTitle":
-      header.textContent = "Select Title";
-      
-      const titleBody = document.createElement("div");
-      titleBody.className = "hint";
-      titleBody.style.whiteSpace = "pre-wrap";
-      titleBody.textContent = "Choose a title to display before your character's name.";
-      outputEl.appendChild(titleBody);
-      
-      actionChoices = [
-        { label: "Novice", onChoose: () => setTitle("Novice") },
-        { label: "Adventurer", className: "secondary", onChoose: () => setTitle("Adventurer") },
-        { label: "Hero", className: "secondary", onChoose: () => setTitle("Hero") },
-        { label: "Legend", className: "secondary", onChoose: () => setTitle("Legend") },
-        { label: "No Title", className: "secondary", onChoose: () => setTitle("") },
-        { label: "Back", className: "secondary", onChoose: () => showDesign() }
-      ];
-      break;
-      
-    case "modifyBackground":
-      header.textContent = "Modify Background";
-      
-      const bgBody = document.createElement("div");
-      bgBody.className = "hint";
-      bgBody.style.whiteSpace = "pre-wrap";
-      bgBody.textContent = "Change your character's backstory and origin.";
-      outputEl.appendChild(bgBody);
-      
-      actionChoices = [
-        { label: "Noble Birth", onChoose: () => setBackground("noble") },
-        { label: "Commoner", className: "secondary", onChoose: () => setBackground("commoner") },
-        { label: "Orphan", className: "secondary", onChoose: () => setBackground("orphan") },
-        { label: "Mysterious", className: "secondary", onChoose: () => setBackground("mysterious") },
-        { label: "Back", className: "secondary", onChoose: () => showDesign() }
-      ];
-      break;
-      
-    case "resetDesign":
-      header.textContent = "Reset Design";
-      
-      const resetBody = document.createElement("div");
-      resetBody.className = "hint";
-      resetBody.style.whiteSpace = "pre-wrap";
-      resetBody.textContent = "Are you sure you want to reset all design customizations to default?";
-      outputEl.appendChild(resetBody);
-      
-      actionChoices = [
-        { label: "Yes, Reset Design", className: "danger", onChoose: () => doResetDesign() },
-        { label: "No, Cancel", className: "secondary", onChoose: () => showDesign() }
-      ];
-      break;
-      
-    default:
-      showDesign();
-      return;
-  }
-  
-  outputEl.appendChild(header);
-  showChoices(actionChoices);
-  outputEl.scrollTop = 0;
-  renderStats();
-}
-
-function promptForName() {
-  const newName = prompt("Enter new character name:", state.profile || "");
-  if (newName && newName.trim()) {
-    state.profile = newName.trim();
-    state.design = state.design || {};
-    state.design.customName = true;
-    
-    const message = document.createElement("div");
-    message.className = "hint";
-    message.style.whiteSpace = "pre-wrap";
-    message.textContent = `Character name changed to: ${newName.trim()}`;
-    outputEl.appendChild(message);
-    
-    setTimeout(() => showDesign(), 1500);
-  }
-}
-
-function generateRandomName() {
-  const names = ["Aldric", "Brenna", "Caelan", "Daria", "Eamon", "Fiona", "Gareth", "Hazel", "Ivor", "Jocelyn"];
-  const randomName = names[Math.floor(Math.random() * names.length)];
-  
-  state.profile = randomName;
-  state.design = state.design || {};
-  state.design.customName = true;
-  
-  const message = document.createElement("div");
-  message.className = "hint";
-  message.style.whiteSpace = "pre-wrap";
-  message.textContent = `Character name changed to: ${randomName}`;
-  outputEl.appendChild(message);
-  
-  setTimeout(() => showDesign(), 1500);
-}
-
-function setTitle(title) {
-  state.design = state.design || {};
-  state.design.title = title;
-  
-  const message = document.createElement("div");
-  message.className = "hint";
-  message.style.whiteSpace = "pre-wrap";
-  message.textContent = `Title set to: ${title || "None"}`;
-  outputEl.appendChild(message);
-  
-  setTimeout(() => showDesign(), 1500);
-}
-
-function setBackground(background) {
-  state.design = state.design || {};
-  state.design.background = background;
-  
-  const message = document.createElement("div");
-  message.className = "hint";
-  message.style.whiteSpace = "pre-wrap";
-  message.textContent = `Background set to: ${background}`;
-  outputEl.appendChild(message);
-  
-  setTimeout(() => showDesign(), 1500);
-}
-
-function doResetDesign() {
-  state.design = {};
-  
-  const message = document.createElement("div");
-  message.className = "hint";
-  message.style.whiteSpace = "pre-wrap";
-  message.textContent = "Design has been reset to default values.";
-  outputEl.appendChild(message);
-  
-  setTimeout(() => showDesign(), 1500);
-}
-
 init();
+/* VIRELIA V2 - Full RPG Overhaul - Text Only + Consequences
+   Tone: Mix - Dark Gritty + Heroic + Weird Mystery
+   Systems: Consequence Engine, World State, Mix Skills, Free Roam Map, Twists, Living NPCs
+*/
+
+console.log('[VIRELIA V2] Loading overhaul...');
+
+const VIRELIA_LORE = {
+  twistTable: [
+    'The client lied. The target protects innocents.',
+    'Treasure is cursed - wilds spread +1 if taken.',
+    'Rival faction offers double gold to betray mid-mission.',
+    'Monster was once human - mentor recognizes them.',
+    'Rain reveals hidden door under evidence.',
+    'Party member has history with target.',
+    'Success brings guilt - wronged NPC appears later.',
+    'Reward is debt marker that will be called in.',
+    'Location already burning - someone beat you.',
+    'You find a letter in YOUR name, dated 2 years ago.'
+  ]
+};
+
+const ConsequenceEngine = {
+  log: [],
+  logConsequence(flag, text, severity) {
+    if (!state) return;
+    severity = severity || 'info';
+    state.flags = state.flags || {};
+    state.flags['consequence:' + flag] = true;
+    state.flags.consequenceLog = state.flags.consequenceLog || [];
+    state.flags.consequenceLog.push({ flag: flag, text: text, severity: severity, day: (state.world && state.world.day) || 1, ts: Date.now() });
+    if (state.flags.consequenceLog.length > 200) state.flags.consequenceLog = state.flags.consequenceLog.slice(-200);
+    this.log.push(text);
+    appendLog('[CONSEQUENCE] ' + text);
+    if (severity === 'major') appendLog('The city will remember this.');
+  },
+  worldState(s) {
+    if (!s) return null;
+    s.flags = s.flags || {};
+    s.flags.worldState = s.flags.worldState || {
+      sunVault: 70,
+      guildPower: 50,
+      crownPower: 50,
+      rebelPower: 30,
+      wildsSpread: 20,
+      plague: 0,
+      economy: 50,
+      watchHeat: 0,
+      doppelgangerRumor: false
+    };
+    return s.flags.worldState;
+  },
+  applyConsequence(s, type, value) {
+    if (!s) return;
+    value = value || 1;
+    const ws = this.worldState(s);
+    if (!ws) return;
+    if (type === 'betray_guild') {
+      ws.guildPower = Math.max(0, ws.guildPower - 5 * value);
+      ws.rebelPower = Math.min(100, ws.rebelPower + 3 * value);
+      ws.economy = Math.max(10, ws.economy - 2 * value);
+      this.logConsequence('betray_guild_' + Date.now(), 'Guild loses power. Merchants raise prices.', 'major');
+    } else if (type === 'aid_crown') {
+      ws.crownPower = Math.min(100, ws.crownPower + 4 * value);
+      ws.watchHeat = Math.min(100, ws.watchHeat + 2 * value);
+    } else if (type === 'wilds_deal') {
+      ws.wildsSpread = Math.min(100, ws.wildsSpread + 6 * value);
+      ws.sunVault = Math.max(0, ws.sunVault - 3 * value);
+      ws.plague = Math.min(100, ws.plague + 2 * value);
+      this.logConsequence('wilds_deal_' + Date.now(), 'Wilds spread. Torches burn shorter.', 'major');
+    } else if (type === 'seal_vault') {
+      ws.sunVault = Math.min(100, ws.sunVault + 8 * value);
+      ws.wildsSpread = Math.max(0, ws.wildsSpread - 5 * value);
+      ws.economy = Math.min(100, ws.economy + 3 * value);
+    } else if (type === 'kill_innocent') {
+      ws.watchHeat = Math.min(100, ws.watchHeat + 8 * value);
+      this.logConsequence('kill_innocent_' + Date.now(), 'Innocent blood. Guards watch closer.', 'major');
+    } else if (type === 'show_mercy') {
+      ws.rebelPower = Math.min(100, ws.rebelPower + 2 * value);
+    } else if (type === 'steal') {
+      ws.economy = Math.max(5, ws.economy - 1 * value);
+      ws.watchHeat = Math.min(100, ws.watchHeat + 3 * value);
+    }
+    this.updateShopModifiers(s);
+  },
+  updateShopModifiers(s) {
+    const ws = this.worldState(s);
+    s.flags.shopPriceMod = 1 + (50 - ws.economy) * 0.016;
+    s.flags.ambushMod = ws.watchHeat / 100;
+  },
+  pickTwist() {
+    const list = VIRELIA_LORE.twistTable;
+    return list[Math.floor(Math.random() * list.length)];
+  }
+};
+
+const _origAdjustReputation = typeof adjustReputation === 'function' ? adjustReputation : null;
+function adjustReputationV2(faction, delta) {
+  if (_origAdjustReputation) {
+    _origAdjustReputation(faction, delta);
+  } else if (state) {
+    state.reputation = state.reputation || {};
+    state.reputation[faction] = (state.reputation[faction] || 0) + delta;
+  }
+  if (delta < 0) {
+    ConsequenceEngine.logConsequence('rep_' + faction + '_down_' + Date.now(), faction + ' reputation fell (' + delta + ').', 'info');
+  }
+  if (state) {
+    const ws = ConsequenceEngine.worldState(state);
+    if (!ws) return;
+    if (faction === 'Guild') ws.guildPower = Math.max(0, Math.min(100, ws.guildPower + delta * 2));
+    if (faction === 'Crown') ws.crownPower = Math.max(0, Math.min(100, ws.crownPower + delta * 2));
+    if (faction === 'Rebels') ws.rebelPower = Math.max(0, Math.min(100, ws.rebelPower + delta * 2));
+    if (faction === 'Wilds') ws.wildsSpread = Math.max(0, Math.min(100, ws.wildsSpread + delta * 1.5));
+  }
+}
+try { adjustReputation = adjustReputationV2; } catch (e) {}
+if (typeof window !== 'undefined') window.adjustReputation = adjustReputationV2;
+
+/* 2. MIX SKILLS */
+const MIX_SKILLS = [
+  {
+    key: 'mix_shadowsteel_dance',
+    label: 'Shadowsteel Dance',
+    desc: 'Hybrid Fighter+Rogue. Requires Str5 Cun5 Lv6. Hit 2 enemies, bleed chance. Consequence: leaves exposed.',
+    req: { stats: { strength:5, cunning:5 }, level:6 },
+    tier: 3, focus: 'strength', powerful: true, mixOf: ['fighter','rogue']
+  },
+  {
+    key: 'mix_arcane_warden',
+    label: 'Arcane Warden',
+    desc: 'Hybrid Fighter+Mage. Str4 Arc5 Lv7. Blade of light shields party. Costs 6 mana. If sunVault<50 may curse.',
+    req: { stats: { strength:4, arcana:5 }, level:7 },
+    tier: 4, focus: 'arcana', powerful: true, mixOf: ['fighter','mage']
+  },
+  {
+    key: 'mix_plague_doctor',
+    label: 'Plague Doctor Mercy',
+    desc: 'Hybrid Cleric+Rogue. Res4 Cun4 Lv6. Heal + cure poison/curse for 2 allies. Risk infection if plague>30.',
+    req: { stats: { resilience:4, cunning:4 }, level:6 },
+    tier: 3, focus: 'resilience', powerful: true, mixOf: ['cleric','rogue']
+  },
+  {
+    key: 'mix_soul_weaver',
+    label: 'Soul Weaver',
+    desc: 'Hybrid Mage+Cleric. Arc6 Res4 Lv8. Revive ally at 30% without feather. Max HP -10% until rested.',
+    req: { stats: { arcana:6, resilience:4 }, level:8 },
+    tier: 4, focus: 'arcana', powerful: true, mixOf: ['mage','cleric']
+  },
+  {
+    key: 'mix_wild_hunt',
+    label: 'Wild Hunt Calling',
+    desc: 'Hybrid Ranger+Wilds. Cun5 Res5 Wilds rep>=5 Lv7. Summon spirits +escape +dmg but wilds+1. May attack if you wronged Wilds.',
+    req: { stats: { cunning:5, resilience:5 }, factions: { Wilds:5 }, level:7 },
+    tier: 4, focus: 'cunning', powerful: true, mixOf: ['ranger','wilds']
+  },
+  {
+    key: 'mix_oathbreaker',
+    label: 'Oathbreaker Judgment',
+    desc: 'Fighter+Crown. Massive execute. Consequence: Crown-2 Rebels+1 guilt flag.',
+    req: { stats: { strength:6 }, level:9 },
+    tier: 5, focus: 'strength', powerful: true, mixOf: ['fighter','crown']
+  },
+  {
+    key: 'mix_gutter_saint',
+    label: 'Gutter Saint Coin',
+    desc: 'Any+Rebel. If gave to beggars 3 times, unlock. Steal 15g from rich enemy. Consequence Guild-1 watchHeat+3.',
+    req: { level:5, consequenceFlags: ['gave_to_beggars_3'] },
+    tier: 2, focus: 'cunning', powerful: false, mixOf: ['rebel']
+  },
+  {
+    key: 'mix_void_sight',
+    label: 'Void Sight',
+    desc: 'Weird skill. Triggered if stared into Vault. See hidden intents. Costs 4 mana 2 HP. May trigger doppelganger rumor.',
+    req: { level:6, consequenceFlags: ['looked_into_vault'] },
+    tier: 3, focus: 'arcana', powerful: true
+  }
+];
+
+function meetsMixSkillReq(s, def) {
+  if (!s) return false;
+  if (def.req.level && (s.level || 1) < def.req.level) return false;
+  if (def.req.stats) {
+    for (const k in def.req.stats) {
+      if ((s.stats && s.stats[k] || 0) < def.req.stats[k]) return false;
+    }
+  }
+  if (def.req.factions) {
+    for (const f in def.req.factions) {
+      if ((s.reputation && s.reputation[f] || 0) < def.req.factions[f]) return false;
+    }
+  }
+  if (def.req.consequenceFlags) {
+    for (let i=0; i<def.req.consequenceFlags.length; i++) {
+      const flag = def.req.consequenceFlags[i];
+      if (!s.flags) return false;
+      if (!s.flags['consequence:' + flag] && !s.flags[flag]) return false;
+    }
+  }
+  if (def.mixOf && def.mixOf.length) {
+    const prof = s.character && s.character.profession;
+    for (let i=0; i<def.mixOf.length; i++) {
+      const needProf = def.mixOf[i];
+      if (needProf === prof) continue;
+      if (['fighter','rogue','mage','cleric','ranger'].indexOf(needProf) >=0) {
+        let count = 0;
+        const learned = s.skills && s.skills.learned || {};
+        for (const k in learned) {
+          if (k.indexOf('_' + needProf + '_') >=0) count++;
+        }
+        if (count < 2) return false;
+      }
+    }
+  }
+  return true;
+}
+
+function availableMixSkills(s) {
+  const out = [];
+  for (let i=0; i<MIX_SKILLS.length; i++) {
+    const def = MIX_SKILLS[i];
+    if (s.skills && s.skills.learned && s.skills.learned[def.key]) continue;
+    if (meetsMixSkillReq(s, def)) out.push(def);
+  }
+  return out;
+}
+
+function injectMixSkillsIntoCatalog() {
+  for (let i=0; i<MIX_SKILLS.length; i++) {
+    const def = MIX_SKILLS[i];
+    if (!ITEM_CATALOG[def.key]) {
+      ITEM_CATALOG[def.key] = { label: def.label, consumable: false, desc: def.desc + ' [MIX SKILL]' };
+    }
+  }
+}
+injectMixSkillsIntoCatalog();
+
+const _origSkillDef = typeof skillDef === 'function' ? skillDef : null;
+function skillDefV2(key) {
+  for (let i=0; i<MIX_SKILLS.length; i++) {
+    if (MIX_SKILLS[i].key === key) {
+      const m = MIX_SKILLS[i];
+      return { key: m.key, label: m.label, desc: m.desc, profession: 'mix', build: 'hybrid', focus: m.focus, tier: m.tier, powerful: !!m.powerful, isMix: true };
+    }
+  }
+  if (_origSkillDef) return _origSkillDef(key);
+  return { key: key, label: key, desc: '', profession: 'unknown', build: 'unknown', focus: 'balanced', tier:1 };
+}
+try { skillDef = skillDefV2; } catch (e) {}
+if (typeof window !== 'undefined') window.skillDef = skillDefV2;
+
+/* 3. EXPANDED ITEMS */
+const V2_ITEMS = {
+  crown_of_thorns: { label: 'Crown of Thorns', consumable:false, desc: 'Whispers promises. +5 all stats but sunVault -1 per day. wilds +2 while equipped.' },
+  debt_marker_guild: { label: 'Guild Debt Marker', consumable:false, desc: 'Got 100g. Guild WILL collect later. Consequence major.' },
+  letter_to_self: { label: 'Letter To Yourself', consumable:false, desc: 'Your handwriting dated 2 years ago: Dont trust lantern shop. Doppelganger rumor.' },
+  hollow_child_doll: { label: 'Hollow Child Doll', consumable:false, desc: 'Child gave it. Sell = Wilds -5. Keep = whispers restore 1 mana but plague+1.' },
+  sun_vault_shard: { label: 'Sun Vault Shard', consumable:false, desc: 'Fragment light. Seal breach sunVault+5 wilds-5 OR sell 150g but wilds+3.' },
+  rebels_blood_oath: { label: 'Rebels Blood Oath', consumable:false, desc: 'Sign blood Crown-2 Rebels+3 unlocks Oathbreaker if betray.' },
+  beggars_bowl: { label: 'Beggars Bowl', consumable:false, desc: 'Tracks gives. After 3 unlocks Gutter Saint. Party heals +2 on rest.' },
+  wilds_mushroom: { label: 'Wilds Mushroom', consumable:true, desc: 'Heal 12 HP restore 6 mana 20% poison wilds+1. Forest remembers.' },
+  doppel_smoke: { label: 'Doppel Smoke', consumable:true, desc: 'Clone +50% escape. Rumor copy robbing stall +watchHeat.' }
+};
+for (const k in V2_ITEMS) {
+  if (!ITEM_CATALOG[k]) ITEM_CATALOG[k] = V2_ITEMS[k];
+}
+
+/* 4. NPCS */
+const V2_NPCS = {
+  mara_crossroads: { name: 'Elder Mara', role: 'Crossroads keeper', desc: 'Remembers every time you left someone behind.' },
+  korg_blacksmith: { name: 'Korg', role: 'Blacksmith', desc: 'Charges less if bring ore, more if stole from Guild.' },
+  lys_alchemist: { name: 'Lys', role: 'Alchemist', desc: 'Refuses if poisoned innocents.' },
+  vael_enchanter: { name: 'Vael', role: 'Enchanter', desc: 'Vault lore if looked into vault.' },
+  jun_tavern: { name: 'Jun', role: 'Tavernkeep', desc: 'Recruit costs depend affinity.' },
+  child_ruins: { name: 'Hollow Child', role: 'Mystery', desc: 'Gives doll. Vanishes if wilds>50.' }
+};
+function npcAttitude(npcId) {
+  if (!state) return 0;
+  state.flags = state.flags || {};
+  state.flags.npcAttitudes = state.flags.npcAttitudes || {};
+  return state.flags.npcAttitudes[npcId] || 0;
+}
+function adjustNpc(npcId, delta, memoryText) {
+  if (!state) return;
+  state.flags = state.flags || {};
+  state.flags.npcAttitudes = state.flags.npcAttitudes || {};
+  state.flags.npcAttitudes[npcId] = (state.flags.npcAttitudes[npcId] || 0) + delta;
+  if (memoryText) {
+    state.flags.npcMemories = state.flags.npcMemories || {};
+    state.flags.npcMemories[npcId] = state.flags.npcMemories[npcId] || [];
+    state.flags.npcMemories[npcId].push({ text: memoryText, day: (state.world && state.world.day) || 1 });
+  }
+}
+
+/* 5. MISSIONS WITH TWISTS */
+const V2_MISSION_TEMPLATES = [
+  { hook: 'Vault light flickers. Curator offers gold.', twist: function(){ return ConsequenceEngine.pickTwist(); } },
+  { hook: 'Ledger shows payments to disappear people.', twist: function(){ return 'Ledger is fake planted by Rebels to frame Guild'; } },
+  { hook: 'Child in ruins holds doll.', twist: function(){ return 'Doll whispers your name. Keep = whispers. Sell = Wilds-5'; } }
+];
+
+function genMissionsV2(count, seed) {
+  seed = seed || 0;
+  let base = [];
+  try {
+    if (typeof genMissions === 'function' && genMissions !== genMissionsV2) {
+      // avoid recursion
+      base = [];
+    }
+  } catch(e) {}
+  // Generate fresh if base empty - use old logic simplified
+  if (base.length === 0) {
+    for (let i=0; i<count; i++) {
+      const diffs = ['easy','normal','hard','elite','legendary'];
+      const diff = diffs[Math.min(4, Math.floor(i/120))];
+      const factions = ['Guild','Rebels','Crown','Wilds'];
+      base.push({
+        id: 'm' + (i+1),
+        kind: 'mission',
+        title: '#' + (i+1) + ' ' + V2_MISSION_TEMPLATES[i % V2_MISSION_TEMPLATES.length].hook,
+        difficulty: diff,
+        recLevel: 1 + Math.floor(i/10),
+        faction: factions[i % 4],
+        xp: 30 + i,
+        gold: 10 + Math.floor(i/2)
+      });
+    }
+  }
+  const missions = [];
+  for (let i=0; i<count; i++) {
+    const orig = base[i] || { id:'m'+(i+1), kind:'mission', title:'Mission '+(i+1), difficulty:'normal', recLevel:1, faction:'Guild', xp:30, gold:10 };
+    const hasTwist = Math.random() < 0.35;
+    missions.push({
+      id: orig.id,
+      kind: orig.kind,
+      title: orig.title,
+      difficulty: orig.difficulty,
+      recLevel: orig.recLevel,
+      faction: orig.faction,
+      xp: orig.xp,
+      gold: orig.gold,
+      v2: true,
+      hook: V2_MISSION_TEMPLATES[i % V2_MISSION_TEMPLATES.length].hook,
+      twist: hasTwist ? V2_MISSION_TEMPLATES[i % V2_MISSION_TEMPLATES.length].twist() : null
+    });
+  }
+  return missions;
+}
+
+function genSideQuestsV2(count, seed) {
+  seed = seed || 0;
+  const quests = [];
+  for (let i=0; i<count; i++) {
+    const hasMoral = Math.random() < 0.45;
+    quests.push({
+      id: 's' + (i+1),
+      kind: 'side',
+      title: 'Side ' + (i+1) + ' Whispers ' + (i%10),
+      minLevel: 1 + Math.floor(i/15),
+      faction: ['Guild','Rebels','Crown','Wilds'][i%4],
+      place: ['Market','Gate','Marsh','Ruins'][i%4],
+      xp: 18 + Math.floor(i*1.7),
+      gold: 6 + Math.floor(i*0.6),
+      v2: true,
+      moralChoice: hasMoral
+    });
+  }
+  return quests;
+}
+
+let _origGenMissionsRef = null;
+let _origGenSideRef = null;
+try {
+  // Save originals if not yet saved
+  if (typeof window !== 'undefined') {
+    if (window._v2OrigGenMissions) _origGenMissionsRef = window._v2OrigGenMissions;
+  }
+} catch(e){}
+try {
+  _origGenMissionsRef = genMissions;
+  _origGenSideRef = genSideQuests;
+  genMissions = function(count, seed) { return genMissionsV2(count, seed); };
+  genSideQuests = function(count, seed) { return genSideQuestsV2(count, seed); };
+  if (typeof window !== 'undefined') {
+    window.genMissions = genMissions;
+    window.genSideQuests = genSideQuests;
+    window._v2OrigGenMissions = _origGenMissionsRef;
+    window._v2OrigGenSide = _origGenSideRef;
+  }
+} catch(e) { console.warn('override failed', e); }
+
+/* 6. FREE ROAM MAP */
+const V2_AREAS = {
+  streets: { label:'Low Streets', danger:1, cost:{}, connects:['docks','market','gate','ruins'], desc:'Crowded, watchful. Rumors.' },
+  docks: { label:'Dock Warrens', danger:2, cost:{ waterskin:1 }, connects:['streets','marsh','market'], desc:'Salt, knives. Smugglers offer mushroom.' },
+  market: { label:'High Market', danger:0, cost:{}, connects:['streets','docks','gate','crossroads'], desc:'Safe-ish. Korg forge.' },
+  gate: { label:'Virelia Gate', danger:1, cost:{ waterskin:1 }, connects:['streets','road','market'], desc:'Leaving costs water. Guards if watchHeat>30.' },
+  road: { label:'Open Road', danger:2, cost:{ ration:1, waterskin:1 }, connects:['gate','ruins','marsh'], desc:'Ambush chance danger+risk+watchHeat.' },
+  ruins: { label:'Old Ruins', danger:3, cost:{ torch:1, ration:1 }, connects:['road','streets','vault'], desc:'Needs torch else -20% accuracy. Hollow child.' },
+  marsh: { label:'Fog Marsh', danger:3, cost:{ ration:1, waterskin:1 }, connects:['road','docks','wilds'], desc:'High wilds. Forage herbs poison risk 15%.' },
+  vault: { label:'Sun Vault Approach', danger:4, cost:{ torch:1, waterskin:1 }, connects:['ruins'], desc:'Shard may be found. Looking flags you.' },
+  wilds: { label:'Deep Wilds', danger:5, cost:{ ration:2, waterskin:2, torch:1 }, connects:['marsh'], desc:'Most dangerous. Rare loot. Wilds+1 if camp no ritual.' },
+  crossroads: { label:'Crossroads', danger:0, cost:{}, connects:['market','streets','road'], desc:'Hub. Mara judges.' }
+};
+
+function ensureV2Roam(s) {
+  if (!s) return null;
+  s.roam = s.roam || {};
+  if (!s.roam.v2) s.roam.v2 = { current:'crossroads', visited:{}, risk:0, steps:0 };
+  return s.roam.v2;
+}
+
+function roamActV2(s, kind) {
+  if (!s) return;
+  normalizeState(s);
+  if (typeof isCombatActive === 'function' && isCombatActive(s)) {
+    appendLog("You can't rest during combat.");
+    return;
+  }
+  if (typeof hasEffectOnState === 'function' && hasEffectOnState(s, 'rested')) {
+    appendLog("You aren't ready to rest again yet. (Rested cooldown active)");
+    return;
+  }
+  const v2 = ensureV2Roam(s);
+  const area = V2_AREAS[v2.current] || V2_AREAS.streets;
+  if (kind === 'rest') {
+    if (v2.current === 'wilds' && !s.flags['ritual_ward']) {
+      ConsequenceEngine.applyConsequence(s, 'wilds_deal', 1);
+      appendLog('You camp in Deep Wilds without ward. Wilds+1');
+    }
+    v2.risk = Math.max(0, v2.risk - 25);
+    s.hp = Math.min(playerMaxHp(), (s.hp||0) + 3);
+    if (s.party && Array.isArray(s.party.members)) {
+      for (let i=0; i<s.party.members.length; i++) {
+        const m = s.party.members[i];
+        if (!m) continue;
+        const h = Math.max(1, Math.floor((m.maxHp||1)*0.25));
+        m.hp = Math.min(m.maxHp||1, (m.hp||0)+h);
+      }
+    }
+    s.mana = Math.min(playerMaxMana(), (s.mana||0)+2);
+    appendLog('Rest in ' + area.label + ' (+3 HP, +2 mana, party +25%). Risk lowered.');
+    if (area.label.indexOf('Ruins') >=0 && s.inventory && s.inventory.hollow_child_doll) {
+      appendLog('Doll whispers: You left before. +1 mana +1 plague');
+      s.mana = Math.min(playerMaxMana(), (s.mana||0)+1);
+      ConsequenceEngine.worldState(s).plague++;
+    }
+    if (typeof addEffect === 'function') addEffect('rested', 30000);
+    if (typeof autoSave === 'function') autoSave();
+    if (typeof render === 'function') render();
+    return;
+  }
+  if (kind === 'forage') {
+    const inv = s.inventory || {};
+    if (area.cost.ration && (inv.ration||0) < area.cost.ration) { appendLog('Lack rations'); return; }
+    if (area.cost.torch && (inv.torch||0) < 1) {
+      appendLog('Needs torch. -20% accuracy risk.');
+      if (Math.random()<0.5) { appendLog('Stumble dark HP-4'); applyDamage(4); }
+    }
+    v2.risk = Math.min(100, v2.risk + 10 + area.danger*4);
+    if (Math.random() < 0.6) {
+      const lootTable = ['herb_sageleaf','herb_nightbloom','rune_shard','wilds_mushroom','sun_vault_shard'];
+      const k = lootTable[Math.floor(Math.random()*lootTable.length)];
+      if (Math.random()<0.8 || k==='herb_sageleaf') {
+        addInvItem(s, k, 1);
+        appendLog('Foraged: ' + itemLabel(k) + ' in ' + area.label);
+        if (k==='wilds_mushroom') ConsequenceEngine.applyConsequence(s,'wilds_deal',0.5);
+      }
+    }
+    if (Math.random() < (0.08 + area.danger*0.04 + v2.risk*0.002)) {
+      appendLog('Encounter!');
+      s.world.pendingEvent = createCombatEvent(s, 'ambush');
+    }
+    return;
+  }
+  if (kind === 'scout') {
+    v2.risk = Math.min(100, v2.risk + 5);
+    const rumor = (typeof roamRumor === 'function') ? roamRumor() : 'You hear whispers';
+    appendLog('Scout in ' + area.label + ': ' + rumor);
+    return;
+  }
+  v2.risk = Math.min(100, v2.risk + 12 + area.danger*3);
+  v2.steps++;
+  if (Math.random()<0.25) {
+    appendLog('Explore ' + area.label + ': ' + area.desc);
+    if (Math.random()<0.3) {
+      const conn = area.connects[Math.floor(Math.random()*area.connects.length)];
+      if (!v2.visited[conn]) {
+        v2.visited[conn]=true;
+        appendLog('Discovered path to ' + (V2_AREAS[conn] && V2_AREAS[conn].label || conn));
+      }
+    }
+  }
+  if (typeof roamMaybeEncounter === 'function' && roamMaybeEncounter(s, area.label)) return;
+  if (Math.random() < 0.2 + area.danger*0.05) {
+    const gold = 2+Math.floor(Math.random()*10);
+    s.gold += gold;
+    appendLog('Found ' + gold + ' gold in ' + area.label);
+  }
+}
+try { roamAct = roamActV2; } catch(e){}
+if (typeof window !== 'undefined') window.roamAct = roamActV2;
+
+/* 7. COMBAT TWISTS */
+const _origEnemiesAttack = typeof enemiesAttack === 'function' ? enemiesAttack : null;
+function enemiesAttackV2(ev) {
+  if (_origEnemiesAttack) _origEnemiesAttack(ev);
+  if (!ev) return;
+  if (Math.random() < 0.18) {
+    const twistRoll = Math.random();
+    if (twistRoll < 0.33) {
+      const low = ev.enemies.filter(function(e){ return e && (e.hp||0)>0 && (e.hp/e.maxHp)<0.25; });
+      if (low.length && Math.random()<0.6) {
+        const en = low[0];
+        pushCombatLog(ev, 'SURRENDER: ' + en.name + ' begs mercy. Capture for consequence!');
+        ev.surrender = { enemy: en.key, name: en.name };
+      }
+    } else if (twistRoll < 0.66) {
+      if (Math.random()<0.3 && ev.enemies.length < 5) {
+        const mob = mobDef(1+Math.floor(Math.random()*MOB_COUNT));
+        mob.hp = Math.floor(mob.maxHp*0.8);
+        ev.enemies.push(mob);
+        pushCombatLog(ev, 'Reinforcement! ' + mob.name + ' joins, drawn by noise.');
+      }
+    } else {
+      if (state && state.nodeId === 'ruins' && !(state.inventory && state.inventory.torch)) {
+        pushCombatLog(ev, 'Darkness: No torch, accuracy -25% this round!');
+      }
+    }
+  }
+}
+try { enemiesAttack = enemiesAttackV2; } catch(e){}
+if (typeof window !== 'undefined') window.enemiesAttack = enemiesAttackV2;
+
+/* 8. STORY NODES */
+function injectV2StoryNodes() {
+  if (typeof STORY === 'undefined') return;
+
+  // Crossroads extra
+  const origCross = STORY.crossroads;
+  if (origCross && origCross.text) {
+    const origFn = origCross.text;
+    if (typeof origFn === 'function') {
+      STORY.crossroads.text = function(s) {
+        const base = origFn(s);
+        const ws = ConsequenceEngine.worldState(s);
+        if (!ws) return base;
+        const recent = (s.flags.consequenceLog||[]).slice(-2).map(function(c){ return c.text; }).join(' ; ') || 'None yet';
+        const extra = '\n\n-- WORLD STATE --\nSunVault: ' + ws.sunVault + '% Guild:' + ws.guildPower + ' Crown:' + ws.crownPower + ' Rebels:' + ws.rebelPower + ' Wilds:' + ws.wildsSpread + '% Watch:' + ws.watchHeat + ' Plague:' + ws.plague + '\nShopMod x' + (s.flags.shopPriceMod||1).toFixed(2) + ' | Recent: ' + recent;
+        return base + extra;
+      };
+    }
+  }
+
+  // Free roam map
+  STORY.free_roam_select.text = function(s) {
+    const v2 = ensureV2Roam(s);
+    const cur = V2_AREAS[v2.current];
+    let map = 'FREE ROAM MAP\n';
+    for (const k in V2_AREAS) {
+      const area = V2_AREAS[k];
+      const conn = area.connects.join(',');
+      const visitedMark = (v2.visited[k] || k===v2.current) ? '[KNOWN]' : '[???]';
+      map += visitedMark + ' ' + area.label + ' (danger ' + area.danger + ') -> ' + conn + '\n';
+    }
+    map += '\nCurrent: ' + cur.label + ' | Risk: ' + v2.risk + '/100 | Steps: ' + v2.steps + '\n' + cur.desc;
+    return map;
+  };
+  STORY.free_roam_select.choices = function(s) {
+    const v2 = ensureV2Roam(s);
+    const cur = V2_AREAS[v2.current];
+    const out = [];
+    for (let i=0; i<cur.connects.length; i++) {
+      const connKey = cur.connects[i];
+      const area = V2_AREAS[connKey];
+      if (!area) continue;
+      out.push({
+        label: 'Travel to ' + area.label + ' (cost: ' + Object.keys(area.cost).map(function(k){ return k+'x'+area.cost[k]; }).join(',') + ' ' + ')',
+        next: 'free_roam',
+        effect: (function(targetKey, targetArea){
+          return function() {
+            const cost = targetArea.cost || {};
+            for (const k in cost) {
+              if ((s.inventory && s.inventory[k] || 0) < cost[k]) { appendLog('Need: ' + k + 'x' + cost[k]); return; }
+            }
+            for (const k in cost) { if (cost[k]>0) consumeInvItem(s,k,cost[k]); }
+            v2.current = targetKey;
+            v2.visited[targetKey]=true;
+            appendLog('Traveled to ' + targetArea.label);
+            const ws = ConsequenceEngine.worldState(s);
+            if (ws.watchHeat > 40 && Math.random()<0.2) {
+              appendLog('Guards stop you. Pay 5g or lose Crown rep.');
+              if ((s.gold||0)>=5) { s.gold-=5; appendLog('-5 gold'); } else { adjustReputation('Crown',-1); }
+            }
+            if (targetKey==='vault' && !s.flags['consequence:looked_into_vault']) {
+              s.flags['consequence:looked_into_vault']=true;
+              addInvItem(s,'sun_vault_shard',1);
+              ConsequenceEngine.applyConsequence(s,'wilds_deal',1);
+              appendLog('Stare into Vault. Gain shard, wilds+1, unlocks Void Sight.');
+            }
+          };
+        })(connKey, area)
+      });
+    }
+    out.push({ label:'Explore Here', next:'free_roam', effect:function(){ roamActV2(s,'explore'); } });
+    out.push({ label:'Scout rumors', next:'free_roam', effect:function(){ roamActV2(s,'scout'); } });
+    out.push({ label:'Forage loot', next:'free_roam', effect:function(){ roamActV2(s,'forage'); } });
+    out.push({ label:'Rest -risk +HP', next:'free_roam', effect:function(){ roamActV2(s,'rest'); } });
+    out.push({ label:'Back to Crossroads', className:'secondary', next:'crossroads' });
+    return out;
+  };
+
+  STORY.free_roam.text = function(s) {
+    const v2 = ensureV2Roam(s);
+    const area = V2_AREAS[v2.current];
+    return 'FREE ROAM: ' + area.label + '\nDanger:' + area.danger + ' Risk:' + v2.risk + '/100 Steps:' + v2.steps + '\n' + area.desc;
+  };
+  STORY.free_roam.choices = function(s) {
+    return [
+      { label:'Explore', next:'free_roam', effect:function(){ roamActV2(s,'explore'); } },
+      { label:'Forage', next:'free_roam', effect:function(){ roamActV2(s,'forage'); } },
+      { label:'Scout', next:'free_roam', effect:function(){ roamActV2(s,'scout'); } },
+      { label:'Rest', next:'free_roam', effect:function(){ roamActV2(s,'rest'); } },
+      { label:'Change Area (Map)', className:'secondary', next:'free_roam_select' },
+      { label:'Return to Crossroads', className:'secondary', next:'crossroads' }
+    ];
+  };
+
+  STORY.consequence_board = {
+    text: function(s) {
+      const log = s.flags && s.flags.consequenceLog || [];
+      const ws = ConsequenceEngine.worldState(s);
+      let t = 'CONSEQUENCE BOARD - City Remembers\n\nWorld: SunVault ' + ws.sunVault + '% Guild ' + ws.guildPower + ' Crown ' + ws.crownPower + ' Rebels ' + ws.rebelPower + ' Wilds ' + ws.wildsSpread + '% Watch ' + ws.watchHeat + ' Plague ' + ws.plague + '\n\nRecent:\n';
+      const recent = log.slice(-12);
+      if (recent.length===0) t+='(none yet)';
+      else {
+        for (let i=0;i<recent.length;i++) {
+          t+='- [Day ' + recent[i].day + '] ' + recent[i].text + ' [' + recent[i].severity + ']\n';
+        }
+      }
+      t+='\nNPC Attitudes:\n';
+      const attitudes = s.flags && s.flags.npcAttitudes || {};
+      for (const id in attitudes) {
+        t+='- ' + (V2_NPCS[id] && V2_NPCS[id].name || id) + ': ' + attitudes[id] + '\n';
+      }
+      return t;
+    },
+    choices: [{ label:'Back to Crossroads', className:'secondary', next:'crossroads' }]
+  };
+
+  STORY.mix_skills_board = {
+    text: function(s) {
+      const avail = availableMixSkills(s);
+      let t = 'MIX SKILLS - Hybrid Paths\nYou can blend professions. Learn 2+ skills from other profession to unlock.\n\nAvailable:\n';
+      if (avail.length===0) t+='(none - keep learning cross-class!)\n';
+      else {
+        for (let i=0;i<avail.length;i++) t+='- ' + avail[i].label + ': ' + avail[i].desc + '\n';
+      }
+      t+='\nLearned:\n';
+      const learnedMix = [];
+      for (let i=0;i<MIX_SKILLS.length;i++) if (s.skills && s.skills.learned && s.skills.learned[MIX_SKILLS[i].key]) learnedMix.push(MIX_SKILLS[i]);
+      if (learnedMix.length===0) t+='(none)';
+      else { for (let i=0;i<learnedMix.length;i++) t+='- ' + learnedMix[i].label + '\n'; }
+      return t;
+    },
+    choices: function(s) {
+      const avail = availableMixSkills(s);
+      const out = [];
+      for (let i=0;i<avail.length;i++) {
+        const m = avail[i];
+        out.push({
+          label: 'Learn ' + m.label + ' (cost ' + m.tier + ' SP)',
+          next: 'mix_skills_board',
+          disabled: (s.skillPoints||0) < m.tier,
+          effect: (function(mix){
+            return function(){
+              if ((s.skillPoints||0) < mix.tier) { appendLog('Not enough SP'); return; }
+              s.skillPoints -= mix.tier;
+              s.skills.learned[mix.key]=1;
+              appendLog('Learned mix skill: ' + mix.label);
+              if (mix.key==='mix_oathbreaker') ConsequenceEngine.logConsequence('learned_oathbreaker','Learned Oathbreaker - Crown watches.','major');
+            };
+          })(m)
+        });
+      }
+      out.push({ label:'Back', className:'secondary', next:'crossroads' });
+      return out;
+    }
+  };
+
+  if (STORY.crossroads && STORY.crossroads.choices) {
+    const origChoicesFn = STORY.crossroads.choices;
+    STORY.crossroads.choices = function(s) {
+      const orig = origChoicesFn(s);
+      const extra = [
+        { label:'Consequence Board (city remembers)', next:'consequence_board', effect:function(){ appendLog('Check whispers board'); } },
+        { label:'Mix Skills - Hybrid Paths', next:'mix_skills_board' }
+      ];
+      return extra.concat(orig);
+    };
+  }
+}
+injectV2StoryNodes();
+
+function initializeV2(s) {
+  if (!s) return;
+  ConsequenceEngine.worldState(s);
+  ensureV2Roam(s);
+  s.flags = s.flags || {};
+  s.flags.npcAttitudes = s.flags.npcAttitudes || {};
+  s.flags.npcMemories = s.flags.npcMemories || {};
+  s.flags.consequenceLog = s.flags.consequenceLog || [];
+}
+
+const _origNormalize = typeof normalizeState === 'function' ? normalizeState : null;
+function normalizeStateV2(s) {
+  if (_origNormalize) _origNormalize(s);
+  if (!s) return;
+  initializeV2(s);
+  const day = s.world && s.world.day || 1;
+  const lastDay = s.flags.v2LastDay || 0;
+  if (day > lastDay) {
+    s.flags.v2LastDay = day;
+    const ws = ConsequenceEngine.worldState(s);
+    if (ws.sunVault < 80 && Math.random()<0.15) {
+      ws.sunVault = Math.max(0, ws.sunVault -1);
+      ws.wildsSpread = Math.min(100, ws.wildsSpread+1);
+    }
+    if (ws.plague>20 && Math.random()<0.1) {
+      ws.plague = Math.min(100, ws.plague+1);
+      if ((s.hp||0)>0) { appendLog('Plague cough -1 HP'); s.hp = Math.max(1, (s.hp||0)-1); }
+    }
+    if ((s.equipment && s.equipment.accessory1==='crown_of_thorns') || (s.equipment && s.equipment.accessory2==='crown_of_thorns')) {
+      ws.sunVault = Math.max(0, ws.sunVault-1);
+      appendLog('Crown of Thorns whispers. Sun Vault -1');
+    }
+  }
+}
+try { normalizeState = normalizeStateV2; } catch(e){}
+if (typeof window !== 'undefined') window.normalizeState = normalizeStateV2;
+
+const _origEnterNode = typeof enterNode === 'function' ? enterNode : null;
+function enterNodeV2(id) {
+  if (_origEnterNode) {
+    if (state && id==='market' && state.flags && state.flags.worldState && state.flags.worldState.watchHeat>60 && Math.random()<0.25) {
+      appendLog('Guard checkpoint at market. High watchHeat.');
+      if (Math.random()<0.4) {
+        if ((state.gold||0)>=8) { state.gold-=8; appendLog('-8 gold bribe'); } else { adjustReputation('Crown',-1); }
+      }
+    }
+    return _origEnterNode(id);
+  }
+}
+try { enterNode = enterNodeV2; } catch(e){}
+if (typeof window !== 'undefined') window.enterNode = enterNodeV2;
+
+function v2Sanity() {
+  return {
+    worldState: state ? ConsequenceEngine.worldState(state) : null,
+    consequences: state && state.flags && state.flags.consequenceLog && state.flags.consequenceLog.length || 0,
+    mixSkillsAvailable: state ? availableMixSkills(state).length : 0,
+    areas: Object.keys(V2_AREAS).length,
+    npcs: Object.keys(V2_NPCS).length
+  };
+}
+if (typeof window !== 'undefined') window.v2Sanity = v2Sanity;
+
+console.log('[VIRELIA V2] Loaded. Systems: consequence, worldState, mixSkills, free roam v2, twists, living NPCs');
+/* VIRELIA V2 - LORE CODEX - Full World Building
+   Adds deep lore for every system so game feels like real RPG
+*/
+
+console.log('[VIRELIA LORE] Loading codex...');
+
+const LORE_CODEX = {
+  world: {
+    virelia_founded: {
+      title: 'Foundation of Virelia',
+      category: 'world',
+      unlock: 'always',
+      text: `Virelia was not built — it was carved. Three hundred years ago, miners chasing a vein of sun-ore broke into a cavern of pure light. The Sun Vault. Light that burned without fuel, that made crops grow in winter, that kept the Fog Marsh from swallowing roads.
+
+A city grew around it like infection around a wound. Walls of black basalt, streets angled to catch light. The Guild claimed the weighing houses. The Crown claimed the gate. The Wilds — old things that lived before men cut trees — were pushed back by lanterns.
+
+The Vault was never infinite. It cracked three years ago, on a night the moons overlapped. No one saw it crack. They only saw the light stutter. Then the fog came back.`
+    },
+    sun_vault: {
+      title: 'The Sun Vault',
+      category: 'world',
+      unlock: 'vault',
+      text: `The Vault is not a mine. It is a heart. A lattice of crystalized sunlight, humming at a frequency that makes teeth ache. Scholars say it is a fallen star, caught. Priests say it is a god's eye, left open.
+
+When it cracked, it did not shatter. It wept. Light leaks in thin threads that dance in dust. Where light touches wild ground, things grow wrong — mushrooms that whisper, vines that write.
+
+Staring into it directly is forbidden by Crown law. Those who did report seeing themselves, older, standing behind them. Consequence: flag looked_into_vault unlocks Void Sight.
+
+Mechanic: sunVault % tracks seal. 100% = contained. 0% = wilds consume city. Rest in Deep Wilds without ward = -1% vault. Crown of Thorns equipped = -1/day.`
+    },
+    wilds: {
+      title: 'The Wilds & Fog Marsh',
+      category: 'world',
+      unlock: 'wilds',
+      text: `Before streets, there were roots. The Wilds is not forest. It is memory of forest — what forest thinks it used to be. It remembers when Virelia was marsh and stone, and it wants to remember again.
+
+Fog Marsh is its mouth. Travelers say fog has weight. It clings to ration packs, makes waterskins taste of iron. The deeper you go, the more herbs you find — sageleaf that has never seen sun, nightbloom that only opens when you are afraid.
+
+The Hollow Child lives there. Some say child is bait. Some say child is what Wilds does when it tries to be human and fails.
+
+Mechanic: wildsSpread % rises with every wilds_mushroom eaten, every rest in wilds unwarded, every failed seal. >50% = Hollow Child vanishes, plague +1 per day, shop prices +40%.`
+    },
+    plague: {
+      title: 'The Lantern Cough',
+      category: 'world',
+      unlock: 'plague',
+      text: `Cough that comes from ashfall nights. Children first. Old miners second. Healers call it ash lung. Lys the Alchemist says it's not lung at all — it's light starvation.
+
+When vault leaks, it leaks not only light but absence of light. A hole in air where light should be. Breathing that hole makes you cough light.
+
+Mechanic: plague stat 0-100. >30 = mild poison on rest in wilds/ruins. >60 = -1 HP per day. Managed by sealing breaches with Sun Vault Shards.`
+    },
+    doppelganger: {
+      title: 'The Doppelganger Rumor',
+      category: 'mystery',
+      unlock: 'letter_to_self',
+      text: `Four people have reported seeing themselves this year. Not reflection. A second self walking Low Streets, buying bread, paying with coin that turns to ash in morning.
+
+You found a letter in YOUR handwriting, dated two years before you arrived. It says: 'Don't trust the lantern shop.'
+
+Either you have been here before and forgot, or something is wearing your face to learn how to be you. The Doppel Smoke item is distilled from trying to catch it — it clones your shape for escape, but rumor spreads copy was seen robbing.
+
+Weird Mystery tone: Never fully explain. Let it be consequence of Void Sight and Sun Vault staring. Flag doppelgangerRumor = true adds random market encounter where stallholder says 'You were here yesterday.'`
+    }
+  },
+  factions: {
+    guild: {
+      title: 'The Guild - Order & Coin',
+      category: 'factions',
+      unlock: 'Guild',
+      text: `Blue seal, black ledger. Guild does not rule — it weighs. Everything has price, including forgiveness. They built Virelia's weighing houses, then decided what could be weighed.
+
+Power: Controls market. When guildPower <30, economy crashes, prices +60%, Korg blacksmith refuses credit. When >70, rare items appear in market but Rebels ambush more.
+
+Leader: Factor Brine. Never seen without gloves. Says gloves keep coin from staining hands. If you bring Guild Seal, he gives Sigil of Guildmaster. If you betray Guild (steal ledger, sell fake), economy -20%, he sends debt collectors after you hold debt_marker_guild.
+
+Moral: Guild promises stability. Stability means some people are always crushed underneath.`
+    },
+    crown: {
+      title: 'The Crown - Law & Steel',
+      category: 'factions',
+      unlock: 'Crown',
+      text: `Captain Varric's men hold Gate in polished plate that hasn't seen battle in years. Crown law is simple: Pay tax, don't look in vault, don't harbor rebels, die quietly if told.
+
+Power: watchHeat stat. When Crown power >60, guard checkpoints at market/gate, random papers check, +8 gold bribe or -1 rep. When <30, rebels control dock at night.
+
+You can turn in Crown Writ for Amulet of Unbroken Oath. If you break oath (kill innocent after taking writ), amulet cracks and Crown rep -5, unlocks Oathbreaker mix skill.
+
+Moral: Law without mercy becomes another gang.`
+    },
+    rebels: {
+      title: 'Rebels - Freedom & Risk',
+      category: 'factions',
+      unlock: 'Rebels',
+      text: `They live in dock warrens, mark doors with charcoal. No leader, only runner with token. They say: 'We don't want to rule. We want to stop being ruled.'
+
+Power: rebelPower high = cheaper tavern recruits, more wilds_mushroom in market, but Crown checkpoints increase. Low = they are hunted, side quests force you to choose: hide them (watchHeat+5) or give them up (Rebels-5 guilt flag).
+
+Blood Oath item: Sign in blood, get Rebels +3 Crown -2, but if you later betray rebels, you unlock Oathbreaker and they send ambush at night.
+
+Moral: Freedom is expensive. Someone always pays.`
+    },
+    wilds_faction: {
+      title: 'The Wilds - The Fourth Faction',
+      category: 'factions',
+      unlock: 'Wilds',
+      text: `Wilds is not people. But city treats it as faction because it acts like one. It takes. It gives. It remembers.
+
+Reputation with Wilds rises when you keep Hollow Child Doll, eat wilds mushrooms, rest without fire. Falls when you sell sun vault shards, kill in ruins, burn marsh.
+
+Wilds rep >=5 unlocks Wild Hunt Calling mix skill. Rep <= -5 makes forage in marsh poison you 30% time.
+
+The wilds does not hate you. It just thinks you are a temporary shape that will become soil soon.`
+    }
+  },
+  locations: {
+    crossroads: {
+      title: 'Crossroads - The City Heart',
+      category: 'locations',
+      unlock: 'always',
+      text: `Four roads meet at a cracked bell. No bellringer — bell rings when vault flickers. Elder Mara sits on crate that has been there since before she was born.
+
+Mara remembers: If you left party member to die, affinity -5. If you gave to beggars, +2. If you returned ledger to rightful faction, +3.
+
+This is hub. Missions board nailed to old shrine. Every nail hole is a promise someone did not keep. From here you can reach Market (safe-ish), Low Streets (rumors), Gate (exit), Tavern (recruits), Free Roam map (10 regions).
+
+World state visible here: SunVault %, powers, watchHeat. City whispers on walls change based on powers.`
+    },
+    low_streets: {
+      title: 'Low Streets',
+      category: 'locations',
+      unlock: 'streets',
+      text: `Lanterns here burn with oil cut with water to save coin. Light is yellow and lies. Children know which puddles reflect true and which show other streets that don't exist.
+
+Danger 1. Encounters 10% + risk. Mostly pickpockets (steal 2-8 gold, consequence steal flag) and rumor mongers. If you have debt_marker_guild, debt collectors (Bandit tier 2) appear here.
+
+Connects to Docks, Market, Gate, Ruins. Discovering connection to Ruins unlocks lore: Ruins are older than Virelia, pre-light city.
+
+If you forage here, you find bandages, cheap tonics. Rarely find letter_to_self if doppelganger rumor active.`
+    },
+    docks: {
+      title: 'Dock Warrens',
+      category: 'locations',
+      unlock: 'docks',
+      text: `Salt rots rope and promises. Smugglers trade wilds_mushroom for waterskins because mushroom makes you not need water for a night — but you dream of roots.
+
+Danger 2, cost waterskin 1. Smugglers: If you have Wilds rep >=3, they sell sun_vault_shard for 80g instead of 150g. If you betrayed rebels before, they attack.
+
+Story hook: A boat that left 3 years ago returned empty last week. Its log shows it reached a place where sun never sets, even at night. Crew gone. Log ends mid-word.
+
+Forage finds herb_nightbloom, rune_shard rarely. Scout may meet Jun tavernkeep's sister who tells you tavern recruit was Crown informant.`
+    },
+    market: {
+      title: 'High Market',
+      category: 'locations',
+      unlock: 'market',
+      text: `Lanterns here are real. Glass, oil, honest wick. Prices are not honest. They breathe with economy stat.
+
+When economy 50 = normal. 10 = +80% price (Guild weak, scarcity). 100 = -30% price (Guild strong, surplus). Korg blacksmith, Lys alchemist, Vael enchanter, crafter, healer all here. Their attitudes affect costs:
+
+Korg: If you bring ore, price -10%. If you stole from Guild, +25% and dialogue: 'I heard about that ledger. Get out.'
+Lys: If you used her brews to poison innocents (use smoke_bomb on beggars), she refuses you and applies antidote costs double.
+Vael: If looked_into_vault, he trades rare rune lore: ring_of_true_sight.
+
+Market is only place where watchHeat checkpoint triggers if >60. Guards may ask papers. Pay 8g or lose Crown rep.`
+    },
+    ruins: {
+      title: 'Old Ruins - Pre-Light City',
+      category: 'locations',
+      unlock: 'ruins',
+      text: `Under Virelia, there is another city that did not need light. Its stones are smooth where hands have never been. It has no windows because it did not want to see sky.
+
+Danger 3, cost torch 1 ration 1. Without torch, accuracy -20% and you stumble HP-4 50% time. With torch, you may see Hollow Child.
+
+Hollow Child: Appears if wildsSpread <50 and you have not sold doll. Offers doll. If you keep, night whispers restore +1 mana but plague +1 per long rest. If you sell for 40g, Wilds rep -5, Mara affinity -3, and you hear crying on rest for 3 days.
+
+Ruins contain loc_XX items (unique finds). Finding all 50 unlocks Chronicle of Ashes. In ruins you can find sun_vault_shard rarely (5%) and crown_of_thorns (1% cursed).
+
+Lore: This city fell because they looked too long into something like vault, before vault.`
+    },
+    marsh: {
+      title: 'Fog Marsh',
+      category: 'locations',
+      unlock: 'marsh',
+      text: `Fog is not weather here. It is slow water. It has taste of iron. You walk through it and it walks through you.
+
+Danger 3, cost ration+water. High wilds encounters. Forage 70% finds something, but 15% poison (if you fail resilience check). Herbs here are stronger: sageleaf heals +2 more.
+
+Traveling through marsh without torch has 30% chance to trigger 'A Pair of Eyes' mystery event — choice to investigate (cunning) for gold or raise torch.
+
+If Wilds rep <= -5, forage poisons you 30% not 15%. If rep >=5, forage may give wilds_mushroom which counts for Gutter Saint unlock.
+
+Connects to road, docks, deep wilds. Deep wilds path discovered only if visited marsh 3+ times — gatekept by experience.`
+    },
+    vault: {
+      title: 'Sun Vault Approach',
+      category: 'locations',
+      unlock: 'vault',
+      text: `Light gets heavy near vault. Air hums. Your teeth ache. Guards are gone — Crown abandoned this post when first guard came back with eyes burned white.
+
+Danger 4, cost torch+water. Contains vault. Looking inside is action with consequence:
+
+Choice 1: Stare — gain sun_vault_shard +1, wilds+1, flag looked_into_vault true, unlocks Void Sight mix skill, doppelganger rumor may start, Vael will trade true sight.
+Choice 2: Place shard to seal — consumes shard, sunVault +5, wilds -5, plague -2, Crown rep +1 (if you do), economy +3.
+Choice 3: Leave — nothing, but you hear vault humming your name later when you rest.
+
+Vault is why classes exist: Fighter learns to guard eyes, Rogue to move without seeing, Mage to read light, Cleric to pray against it, Ranger to track where light does not go.
+
+If sunVault <30%, approach spawns Wraiths (tier 4) — lore: those who stared too long.`
+    },
+    wilds_deep: {
+      title: 'Deep Wilds',
+      category: 'locations',
+      unlock: 'wilds',
+      text: `Trees here are not trees. They are attempts at trees by something that saw tree once and tried to remember. They have too many branches, wrong bark.
+
+Danger 5, cost 2 ration 2 waterskin 1 torch + ritual ward needed. Most dangerous region. Resting without ritual_ward (crafted from rune_shard+ember_gem) triggers wilds_deal +1 and you get cursed 30% chance.
+
+Loot rare: aegis_plate, crown_of_sun_vault 2% each, sun_vault_shard 10%, hollow_child_doll 5% if you lost previous.
+
+Mechanic: If you camp 3 times here, you get flag wilds_touched — unlocks Wild Hunt Calling easier, but Hollow Child vanishes and Mara says 'You smell like wet bark now.'
+
+This is endgame explore area. Free roam steps here increase risk 18 per explore vs 12 elsewhere.`
+    }
+  },
+  people: {
+    mara: {
+      title: 'Elder Mara - Crossroads Keeper',
+      category: 'people',
+      unlock: 'mara_crossroads',
+      text: `Seventy, bent, unkillable. She was here when vault was whole. Says she remembers foundation stone being laid, but stone says it was laid 300 years ago. Either she lies or stone does.
+
+Affinity tracked:
+- Left party member behind to die: -5, dialogue changes: 'You left them. I remember.'
+- Gave to beggars (bowl): +2 per give, after 3 gives she tells you about Gutter Saint skill.
+- Returned ledger to correct faction: +3, gives beggars_bowl item.
+- Sold Hollow Child Doll: -3, rest dialog adds crying.
+- Looked into vault: +1 but worried: 'Now you have two shadows.'
+
+She knows consequence system: She can tell you world state if you ask, and gives rumor about next twist if affinity >=5.
+
+Memories stored in flags.npcMemories.mara_crossroads array with day.`
+    },
+    korg: {
+      title: 'Korg - Blacksmith',
+      category: 'people',
+      unlock: 'korg_blacksmith',
+      text: `Forearms like hams, burns that look like maps. Korg forges what city needs, not what it wants.
+
+Mechanics:
+- Bring ore_iron: forge dagger cost -5g
+- Bring ore_silver: forge steel sword -20g
+- If you stole from Guild (consequence:steal + economy <30), his prices +25% and says 'I heard about that ledger.'
+- If you bring sun_vault_shard, he can forge Lantern of Silent Paths (not just enchanter).
+- Attitude negative if you sold hollow doll? He has child.
+
+Backstory: His daughter died of Lantern Cough last winter. He blames vault crack. If you seal vault +10% total, he gives discount -15% permanently and teaches you Ironbark Gauntlets recipe.
+
+He is the only one who can reforge Crown of Thorns into Crown of Sun Vault, but requires 1 shard + 200g + guilt flag.`
+    },
+    lys: {
+      title: 'Lys - Alchemist',
+      category: 'people',
+      unlock: 'lys_alchemist',
+      text: `Stained gloves, eyes that water from fumes. She grows nightbloom in boxes that have no light inside. How? She won't say.
+
+If you poisoned innocents using her brews (story: use smoke_bomb on beggars event), she refuses service and antidote costs double, says 'My craft is not murder.'
+
+If Wilds rep >=5, she teaches you wilds_mushroom safe preparation (removes poison chance).
+
+She knows plague lore: Bring her 3 sageleaf + 1 nightbloom, she gives antidote recipe that also cures plague -1.
+
+If you bring hollow_child_doll, she says 'This is not doll. This is root wrapped in cloth to look like doll.' and offers to burn it for wilds -2 but doll gone. Moral choice.`
+    },
+    vael: {
+      title: 'Vael - Enchanter',
+      category: 'people',
+      unlock: 'vael_enchanter',
+      text: `Hooded, voice like paper tearing. Enchanter who claims vault is eye, not star.
+
+Unlocks:
+- If looked_into_vault flag true: Trades rune lore, sells ring_of_true_sight for 2 rune_shard + ember_gem (normally 4 shards 2 gems). Also tells you about doppelganger — says vault creates copies when it tries to remember people.
+
+- If you bring letter_to_self: He reads and says 'You wrote this. Then you forgot. Then you will write again. Cycle.' Gives void_sight skill discount -1 SP.
+
+- He can uncurse crown_of_thorns but needs 2 ember_gem + guilt flag cleared via helping Hollow Child.
+
+He is not human? If wildsSpread >70, his dialogue changes to include root metaphors, suggests he is wilds trying to be human — parallel to Hollow Child.`
+    },
+    jun: {
+      title: 'Jun - Tavernkeep',
+      category: 'people',
+      unlock: 'jun_tavern',
+      text: `Tavernkeep who never drinks. Recruits change daily. Recruit cost = 25 + level*6 + recruit.level*3, but modified by Jun affinity:
+
+Affinity +5: -10g discount
+Affinity -5: +15g surcharge
+Affinity -10 (you abandoned party): Refuses recruits, says 'You leave people. Why would they follow you?'
+
+How affinity changes:
+- Hire recruit +1
+- Dismiss recruit -1 (unless low HP dismiss for healing then +0)
+- Leave party member dead (not revive) -5
+- Give gold to tavern (buy round 10g) +2
+
+He knows rumors: If you ask, he tells next day's weather + if siege at Crossroads imminent (requires level 60).`
+    },
+    hollow_child: {
+      title: 'Hollow Child - Mystery',
+      category: 'people',
+      unlock: 'child_ruins',
+      text: `No one agrees what child looks like. Some say boy 8, barefoot. Some say girl with ash hair. Always holds doll.
+
+Lore: Wilds trying to understand child shape. It gives doll because wilds thinks children give dolls. If you keep doll, wilds thinks its attempt worked, stays curious and whispers mana. If you sell doll, wilds thinks attempt failed, withdraws — Wilds rep -5, child vanishes until wildsSpread <50 again.
+
+Child is key to Gutter Saint and Wild Hunt. Giving doll to Lys to burn ends child questline but reduces wilds threat. Keeping doll for 7 days unlocks hollow_child_doll lore where doll talks: says 'Vault is mouth, we are food.'
+
+If you have crown_of_thorns equipped when meeting child, child cries and runs — affinity check.`
+    }
+  },
+  monsters: {
+    bandit: {
+      title: 'Bandits & Thugs',
+      category: 'monsters',
+      unlock: 'always',
+      text: `Not monsters, just hungry. Bandits spawn more when economy <30. They have surrender mechanic at <25% HP — 60% chance they beg mercy. Capturing them gives choice: Crown (+2 Crown 20g) or Rebels (+2 Rebels 10g Guild-1).
+
+Lore: Many bandits are former Guild caravan guards laid off after vault crack. If you have Guild rep >=5, some bandits don't attack, say 'Not worth my contract.'
+
+Twist: 20% of bandits carry sealed_letter? No, only courier. But they may carry debt_marker_guild if they were debt collectors.`
+    },
+    wolf_boar: {
+      title: 'Wolves & Boars',
+      category: 'monsters',
+      unlock: 'always',
+      text: `Wilds animals. Spawn more in marsh/road/ruins. Wolves hunt in packs — extra enemy if more than 1 wolf. Boars charge first round + accuracy.
+
+Consequence: Killing wolves in wilds reduces Wilds rep -0.5 per kill (hidden). Killing them when you have hollow doll makes doll cry and lose 1 mana that day.
+
+If you have Wild Hunt skill, you can call wolves as allies once per free roam explore in wilds — they fight for you one combat then leave, but wilds+1.`
+    },
+    ghoul_wraith: {
+      title: 'Ghouls, Wraiths, Hollow',
+      category: 'monsters',
+      unlock: 'ruins',
+      text: `Those who stared too long into vault. Ghouls are failed enchanter experiments. Wraiths are guards who went blind from light.
+
+Spawn mostly in ruins/vault. Wraith accuracy high (0.75+), but low HP. Ghoul poison chance 40% (venom name). Hollow are ruins attempt at human.
+
+Lore: Vael says 'We tried to bottle light. Light bottled us.'
+
+Twist: 10% chance a wraith is recognizable — former companion from tavern who you dismissed? If so, affinity check, and you can try to talk (Cunning) instead of fight. Success = monster becomes soul thread and you gain sun_vault_shard but take curse.
+
+Mechanic: Without torch in ruins, wraith gets +0.15 accuracy, you get -0.20. With torchlight effect, reverse.`
+    },
+    goblin_raider: {
+      title: 'Goblins & Raiders',
+      category: 'monsters',
+      unlock: 'always',
+      text: `Small, clever, cruel when numerous. Goblins call reinforcements 30% per round if more than 2 goblins alive — spawns extra goblin 0.8 HP.
+
+Raiders are organized bandits with sellsword (tier 4) leader if legendary mission.
+
+Lore: Goblins live in old cisterns under Low Streets. They worship vault crack as mouth of god. If you bring sun_vault_shard to cistern (random travel event), they trade rare ore_silver for it.
+
+Consequence: Killing goblin leader in docks reduces economy +5% (they were smugglers keeping trade moving).`
+    },
+    cultist_hex: {
+      title: 'Cultists & Hex Adepts',
+      category: 'monsters',
+      unlock: 'vault',
+      text: `Cult of Ashen Eye thinks crack is blessing — light should spill, world should burn to see true stars.
+
+Hex Adepts curse on hit 30% — cursed effect small + damage up. They can summon Mire Leech.
+
+Lore: Leader is former Crown archivist who read letter_to_self and went mad. If you have letter, cultist may steal it during combat (10% chance) and try to flee with it.
+
+Twist: If you have Void Sight skill, you see their ritual is actually sealing attempt, but backwards. You can choose to help seal correctly (arcana check): success = sunVault+2 wilds-2 but cultist dies and you lose Crown rep -1 because Crown wanted cult alive for questioning.`
+    },
+    siege_horde: {
+      title: 'Siege Horde & Overlord',
+      category: 'monsters',
+      unlock: 'siege',
+      text: `At level 60+, Crossroads siege triggers. Not random — consequence of world powers imbalance. If Guild+Crown+Rebels total <100, wildsSpread triggers siege.
+
+Horde: 8-11 enemies tier5, 10% HP +16 buff, atk +6. Allies system: adventurer swarm acts with you, dealing damage, healing, guarding.
+
+Overlord: Boss stats 4.6x normal HP, 2.15x atk. Abilities: Dark Mend heals 18% HP when <45%, Shadow Nova AoE all party, Soul Siphon steals dealt damage as heal. Heal cooldown 3.
+
+Lore: Overlord is what happens when someone wears Crown of Thorns too long in vault. Is it you from future? Some dialog hints.
+
+Reward: XP = 90% of xpToNext(level)+800+tier*120, gold 2500+level*40, phoenix_feather, elixirs, rare loot.
+
+Fail consequence: town burns, you exiled, lose save? No, you go to exile_town, keep skills, lose coin supplies, completed missions reset, genMissions seeded with exile seed, market stock shuffled, HP/Mana 55%. Exile risk: first 5 missions -10% outcome.`
+    }
+  },
+  items: {
+    crown_thorns: {
+      title: 'Crown of Thorns - Cursed Relic',
+      category: 'items',
+      unlock: 'crown_of_thorns',
+      text: `Made of bramble that never dies, even cut. Whispers promises: +5 all stats, see hidden options in quests. But:
+
+- sunVault -1 per day equipped
+- wildsSpread +2 while equipped
+- When you sleep, dream of vault as mouth
+- Plague +1 per week
+
+Korg can reforge into Crown of Sun Vault with shard +200g + guilt cleared, turning curse into blessing: +3 stats, no decay, +2 vault.
+
+Vael can uncurse with 2 ember_gem but requires you to help Hollow Child first (keep doll 3 days).
+
+Lore: First worn by mayor who tried to carry vault light in head. Mayor vanished. Crown remained.`
+    },
+    doll: {
+      title: 'Hollow Child Doll',
+      category: 'items',
+      unlock: 'hollow_child_doll',
+      text: `Cloth doll with root hair. Child gave it in ruins.
+
+Keep: Night whispers restore +1 mana on rest, but +1 plague per 3 rests, wilds thinks attempt to be human worked, stays. Child appears more.
+
+Sell: 40g, Wilds rep -5, Mara -3, Korg -2, you hear crying on rest for 3 days (hint text only, no debuff but unsettling).
+
+Give to Lys: She says 'This is root wrapped as doll.' Burns it for wilds -2 but doll gone, Hollow Child quest ends, child vanishes, you gain Sageleaf x2.
+
+Burn yourself: At vault, burns with blue flame, reveals path to sun shard, but wilds -3 and doll gone + guilt flag.
+
+This is moral choice with no right answer — core of RPG mix tone.`
+    },
+    shard: {
+      title: 'Sun Vault Shard',
+      category: 'items',
+      unlock: 'sun_vault_shard',
+      text: `Fragment pure light, warm even through gloves. Smells like summer noon.
+
+Uses:
+- Seal: At vault approach, consume shard: sunVault +5, wilds -5, plague -2, Crown +1, economy +3. Stacks.
+- Sell: 150g to market, but wilds +3, sunVault -1 (you let light leak to wrong hands)
+- Forge: Korg + Enchanter need shard for Lantern of Silent Paths, Crown of Sun Vault, True Sight ring
+- Trade with goblins in cistern for 2 ore_silver + 1 ember_gem (secret market event)
+
+Lore: Shards are what vault weeps. Each shard is a second of future light that will never happen because you took it. That's why sealing with them heals — you return stolen future.
+
+Found: 5% forage ruins, 10% deep wilds, vault stare 100% first time, Wraiths drop 2%.
+
+Consequence: Collecting 5 shards and sealing all at once gives achievement 'Light Keeper' + 500 XP and unlocks aegis_plate lore.`
+    },
+    debt_marker: {
+      title: 'Guild Debt Marker',
+      category: 'items',
+      unlock: 'debt_marker_guild',
+      text: `Blue wax seal pressed onto cheap tin. You got 100g for signing. Fine print in language you don't read.
+
+Debt markers are how Guild controls adventurers who need gold fast. They don't want gold back. They want favor.
+
+Consequence system:
+- Day 10-15 after acquisition: Factor Brine appears at crossroads, says 'Time.' Choice: Pay 150g OR do job: steal ledger from Rebels (betray_guild consequence) OR refuse: Guild -5, economy -10%, Korg +25% prices, bandits spawn as collectors in Low Streets until debt paid.
+
+- If you keep marker for 30 days without paying, Mara says 'Guild mark still on you. They will collect with interest.' At day 35, ambush by 2 sellswords tier 3 in streets.
+
+- Burning marker (at vault with ember_gem): Debt gone, but Guild -3, Crown +1 (Crown likes those who defy Guild).
+
+It is tempting gold early game, but designed to bite. That's consequence design."
+`
+    }
+  },
+  classes: {
+    fighter: {
+      title: 'Fighter - Weapons & Armor',
+      category: 'classes',
+      unlock: 'always',
+      text: `Bonuses: Str2 Res1 HP+8. Starts iron_sword chainmail.
+
+Fighter learns Iron, Steel, War pillars — Guard, Cleave, Stance. Their powerful skills are Titan prefixes: Apex Guard, Dominion Break.
+
+Solo: Reliable. Party: Tank, guard shares with guard action.
+
+Mix paths: Shadowsteel (Rogue), Arcane Warden (Mage), Oathbreaker (Crown).
+
+Lore: Fighters in Virelia are mostly former watch who quit after vault crack because Crown ordered them to stand guard over light that burns eyes.
+
+Twist: If you have Guild debt marker, fighters get dialogue 'Another one who sold sword for coin.'
+
+Endgame: Juggernaut build at 50+ Str — can solo siege horde with Aegis Plate.`
+    },
+    rogue: {
+      title: 'Rogue - Stealth & Precision',
+      category: 'classes',
+      unlock: 'always',
+      text: `Bonuses: Cun2 Str1 Gold+15. Starts dagger cloak lockpick smoke bomb.
+
+Rogue pillars: Shadow, Silent, Viper — Ambush, Feint, Trick. Focus cunning, quick.
+
+Mechanic: Scout gives +0.08 success, smoke_bomb blinds enemies -22% acc 2 turns, escape +22%.
+
+Mix: Shadowsteel (Fighter), Plague Doctor (Cleric), Gutter Saint (Rebel).
+
+Lore: Rogues are lantern-shop kids who learned to move when light flickers. They know Low Streets puddles show other streets.
+
+Skill twist: Some rogue tricks leave you exposed if fail — high risk/high twist like Fallen London's nightmares.
+
+Endgame: Umbral build — 100% escape in Low Streets, can rob Market with consequence watchHeat+10 but gain 50g.`
+    },
+    mage: {
+      title: 'Mage - Arcane & Rituals',
+      category: 'classes',
+      unlock: 'always',
+      text: `Bonuses: Arc2 Cun1 Mana+10. Starts staff tonic mana potion.
+
+Mage pillars: Arcane, Astral, Void — Sigil, Bolt, Weave. Costs mana. Can clear cursed with Voidsalt.
+
+Mana is arcane focus: maxMana = 18 + build + gear + stats.
+
+Mix: Arcane Warden (Fighter), Soul Weaver (Cleric), Void Sight (Vault).
+
+Lore: Mages were archivists who catalogued vault light. When vault cracked, their books wrote themselves backwards. Some learned to read backwards language — that's where Void Sight comes from.
+
+Consequence: Casting in Deep Wilds without ward raises wilds +0.5. Casting near Hollow Child makes child cry and vanish.
+
+Endgame: Eldritch mystic — can cast Chain spell hitting all enemies -4 mana each extra.`
+    },
+    cleric: {
+      title: 'Cleric - Blessings & Wards',
+      category: 'classes',
+      unlock: 'always',
+      text: `Bonuses: Res2 Arc1 HP6 Mana4. Starts health potions amulet.
+
+Cleric pillars: Sacred, Dawn, Hallowed — Ward, Benediction, Prayer. Heal party, clear bleeding/poison/curse.
+
+Mechanic: Heal scales Res + Arc. Party heal kits: Cleric can heal companions well, and companions auto-use potions at low HP if Cleric in party.
+
+Mix: Plague Doctor (Rogue), Soul Weaver (Mage), Gutter Saint? Actually.
+
+Lore: Clerics are not priests of god but of light — they pray to vault like vault is god. When vault cracked, some lost faith, became Oathbreakers. Some doubled faith, became Soil Weavers who think wilds is punishment.
+
+Twist: If plague >50, cleric prayers have 10% chance to fail and trigger cursed. If sunVault >80, prayers +20% heal.`
+    },
+    ranger: {
+      title: 'Ranger - Tracks & Wild Edges',
+      category: 'classes',
+      unlock: 'always',
+      text: `Bonuses: Cun2 Res1 HP4 Gold5. Starts longbow dagger leather.
+
+Ranger pillars: Wild, Hawkeye, Thorn — Mark, Volley, Path, Snare. Scouting, forage better.
+
+Mechanic: Forage in marsh/wilds finds extra herb. Scout reduces danger. Can track: If you scout 3 times in same area, next forage guarantees rare loot.
+
+Mix: Wild Hunt (Wilds), Gutter Saint (Rebels), Shadowsteel? Actually ranger+rogue = Path cutter.
+
+Lore: Rangers were gate watch who left gate to see what beyond map does. They know ruin city older than Virelia.
+
+Endgame: Horizon build — can travel to any area without cost if risk <30, knows hidden cistern path to goblin market.`
+    }
+  }
+};
+
+const LORE_STATE = {
+  unlocked: {},
+  unlock(key) {
+    if (!state) return;
+    state.flags = state.flags || {};
+    state.flags.loreUnlocked = state.flags.loreUnlocked || {};
+    if (state.flags.loreUnlocked[key]) return false;
+    state.flags.loreUnlocked[key] = true;
+    LORE_STATE.unlocked[key] = true;
+    appendLog('[LORE UNLOCKED] ' + (LORE_CODEX[key] && LORE_CODEX[key].title || key));
+    return true;
+  },
+  has(key) {
+    if (state && state.flags && state.flags.loreUnlocked && state.flags.loreUnlocked[key]) return true;
+    return !!LORE_STATE.unlocked[key];
+  }
+};
+
+// Flatten codex lookup
+const LORE_FLAT = {};
+for (const cat in LORE_CODEX) {
+  for (const id in LORE_CODEX[cat]) {
+    LORE_FLAT[id] = LORE_CODEX[cat][id];
+  }
+}
+
+function unlockLore(key) {
+  key = (key||'').toLowerCase();
+  // map item keys to lore
+  const mapping = {
+    streets: 'low_streets',
+    docks: 'docks',
+    market: 'market',
+    ruins: 'ruins',
+    marsh: 'marsh',
+    vault: 'vault',
+    wilds: 'wilds_deep',
+    crossroads: 'crossroads',
+    crown_of_thorns: 'crown_thorns',
+    hollow_child_doll: 'doll',
+    sun_vault_shard: 'shard',
+    debt_marker_guild: 'debt_marker',
+    mara_crossroads: 'mara',
+    korg_blacksmith: 'korg',
+    lys_alchemist: 'lys',
+    vael_enchanter: 'vael',
+    jun_tavern: 'jun',
+    child_ruins: 'hollow_child',
+    fighter: 'fighter',
+    rogue: 'rogue',
+    mage: 'mage',
+    cleric: 'cleric',
+    ranger: 'ranger'
+  };
+  const mapped = mapping[key] || key;
+  // try direct and category searches
+  if (LORE_FLAT[mapped]) return LORE_STATE.unlock(mapped);
+  if (LORE_FLAT[key]) return LORE_STATE.unlock(key);
+  // faction
+  if (key==='guild' || key==='crown' || key==='rebels' || key.indexOf('wilds')>=0) {
+    // try find
+    for (const k in LORE_FLAT) {
+      if (k.indexOf(key)>=0) {
+        LORE_STATE.unlock(k);
+      }
+    }
+  }
+  return false;
+}
+
+// Hook item pick up
+const _origAddInvItem = typeof addInvItem === 'function' ? addInvItem : null;
+function addInvItemV2(s, key, amt) {
+  if (_origAddInvItem) _origAddInvItem(s,key,amt);
+  else {
+    if (!s) return;
+    s.inventory = s.inventory || {};
+    s.inventory[key] = (s.inventory[key]||0) + (amt||0);
+  }
+  unlockLore(key);
+}
+try { addInvItem = addInvItemV2; } catch(e){}
+if (typeof window !== 'undefined') window.addInvItem = addInvItemV2;
+
+// Hook travel and areas
+function unlockAreaLore(areaKey) {
+  unlockLore(areaKey);
+  if (areaKey==='ruins') unlockLore('ghoul_wraith');
+  if (areaKey==='vault') unlockLore('sun_vault');
+  if (areaKey==='marsh') unlockLore('wilds');
+  if (areaKey==='wilds') unlockLore('wilds_deep');
+  if (areaKey==='docks') unlockLore('goblin_raider');
+  if (areaKey==='streets') unlockLore('bandit');
+}
+
+// Hook combat
+const _origCreateCombat = typeof createCombatEvent === 'function' ? createCombatEvent : null;
+function createCombatEventV2(s, kind, mob) {
+  let ev = null;
+  if (_origCreateCombat) ev = _origCreateCombat(s,kind,mob);
+  else ev = { kind:'combat', fromNode: s.nodeId||'crossroads', stage:'combat', enemies: [mobDef(1)], log:[] };
+  // unlock monster lore based on enemies
+  if (ev && ev.enemies) {
+    for (let i=0;i<ev.enemies.length;i++) {
+      const e = ev.enemies[i];
+      if (!e) continue;
+      const name = (e.name||'').toLowerCase();
+      if (name.indexOf('bandit')>=0 || name.indexOf('thug')>=0) unlockLore('bandit');
+      if (name.indexOf('wolf')>=0 || name.indexOf('boar')>=0) unlockLore('wolf_boar');
+      if (name.indexOf('ghoul')>=0 || name.indexOf('wraith')>=0) unlockLore('ghoul_wraith');
+      if (name.indexOf('goblin')>=0 || name.indexOf('raider')>=0) unlockLore('goblin_raider');
+      if (name.indexOf('cultist')>=0 || name.indexOf('hex')>=0) unlockLore('cultist_hex');
+      if (e.siegeBoss) unlockLore('siege_horde');
+    }
+  }
+  return ev;
+}
+try { createCombatEvent = createCombatEventV2; } catch(e){}
+if (typeof window !== 'undefined') window.createCombatEvent = createCombatEventV2;
+
+// Story nodes for lore codex
+function injectLoreNodes() {
+  if (typeof STORY === 'undefined') return;
+
+  STORY.lore_codex = {
+    text: function(s) {
+      const unlocked = s.flags && s.flags.loreUnlocked || {};
+      let count = 0;
+      for (const k in unlocked) if (unlocked[k]) count++;
+      let t = 'LORE CODEX - Virelia Archives\nUnlocked: ' + count + '/' + Object.keys(LORE_FLAT).length + '\n\nCategories: world, factions, locations, people, monsters, items, classes\n\nRecent unlocks:\n';
+      const log = [];
+      for (const k in unlocked) {
+        if (LORE_FLAT[k]) log.push(k);
+      }
+      const recent = log.slice(-8);
+      if (recent.length===0) t+='(none - explore, pick items, fight, talk, stare into vault)\n';
+      else {
+        for (let i=0;i<recent.length;i++) {
+          const entry = LORE_FLAT[recent[i]];
+          if (entry) t+= '- ' + entry.title + ' [' + entry.category + ']\n';
+        }
+      }
+      t+='\nUse search in quest board? No - use buttons below to browse.\n';
+      return t;
+    },
+    choices: function(s) {
+      const cats = ['world','factions','locations','people','monsters','items','classes','mystery'];
+      const out = [];
+      for (let i=0;i<cats.length;i++) {
+        const cat = cats[i];
+        out.push({
+          label: 'Browse ' + cat + ' (' + Object.keys(LORE_CODEX[cat]||{}).length + ')',
+          next: 'lore_codex_' + cat
+        });
+      }
+      out.push({ label:'Back to Crossroads', className:'secondary', next:'crossroads' });
+      return out;
+    }
+  };
+
+  const categories = ['world','factions','locations','people','monsters','items','classes','mystery'];
+  for (let ci=0; ci<categories.length; ci++) {
+    const cat = categories[ci];
+    const entries = LORE_CODEX[cat] || {};
+    STORY['lore_codex_' + cat] = {
+      text: function(s) {
+        const unlocked = s.flags && s.flags.loreUnlocked || {};
+        let t = 'LORE - ' + cat.toUpperCase() + '\n\n';
+        let shown = 0;
+        for (const id in entries) {
+          if (unlocked[id] || unlocked[LORE_FLAT[id] && LORE_FLAT[id].title] || cat==='classes') {
+            // classes always visible? Actually show all classes but lock text maybe
+            const e = entries[id];
+            if (s.flags && s.flags.loreUnlocked && s.flags.loreUnlocked[id] || cat==='classes' || cat==='world') {
+              t += '--- ' + e.title + ' ---\n' + e.text + '\n\n';
+              shown++;
+            } else {
+              t += '--- ' + e.title + ' [LOCKED - explore to unlock] ---\n';
+            }
+          } else {
+            // still show locked title
+            const e = entries[id];
+            t += '??? [LOCKED] - hint: ' + (e.unlock || 'explore') + '\n';
+          }
+        }
+        if (shown===0) t+='Nothing unlocked yet. Explore areas, pick items, talk to NPCs, fight monsters.';
+        return t;
+      },
+      choices: [{ label:'Back to Codex', className:'secondary', next:'lore_codex' }]
+    };
+  }
+
+  // Expand item modal to show lore if unlocked
+  const _origOpenItemModal = typeof openItemModal === 'function' ? openItemModal : null;
+  if (_origOpenItemModal) {
+    // Wrap later - we patch updateItemModal instead
+  }
+
+  // Inject lore into crossroads
+  if (STORY.crossroads && STORY.crossroads.choices) {
+    const orig = STORY.crossroads.choices;
+    STORY.crossroads.choices = function(s) {
+      const base = orig(s);
+      const extra = [{ label:'Lore Codex - Archives', next:'lore_codex', effect:function(){ unlockLore('virelia_founded'); } }];
+      return extra.concat(base);
+    };
+  }
+
+  // Hook travel to unlock
+  const origFreeRoamSelectChoices = STORY.free_roam_select && STORY.free_roam_select.choices;
+  if (origFreeRoamSelectChoices) {
+    const origFn = origFreeRoamSelectChoices;
+    STORY.free_roam_select.choices = function(s) {
+      const out = origFn(s);
+      // after original, we already unlock in travel effect, but also unlock area on entry text
+      return out;
+    };
+  }
+}
+
+injectLoreNodes();
+
+// Also expand existing ITEM_CATALOG descriptions with lore tags
+function expandItemDescWithLore() {
+  // Add lore snippets to existing items
+  const expansions = {
+    bandage: ' Used by Lys the Alchemist. If you use 10+ in Ruins, Lys affinity +1.',
+    torch: ' Ruins needs 1 per explore. Vault approach needs 1. Without, -20% accuracy. Lore: Low Streets lantern oil is cut with water.',
+    waterskin: ' Gate and Marsh cost 1 to travel. Docks smugglers trade mushroom for waterskin.',
+    ration: ' Road, Ruins, Marsh, Wilds cost. Forage can find.',
+    lockpick: ' Low Streets mystery door, cache. 35% success without cunning check. Korg hates lockpicks? No, loves them.',
+    rune_shard: ' Enchanter Vael trades. Forge needs. Lore: Shards are vault attempts to write. Reading backwards unlocks Void Sight.',
+    ember_gem: ' Warm. Forge embercore warhammer. Lore: Ember is solidified cough from plague — miners coughed light.',
+    sealed_letter: ' Starts investigation. Contains names of people who disappeared after vault crack. Lore: Courier who gave it disappeared next day.',
+    ledger: ' Evidence. Deliver to allegiance for reward but loses other faction -2. Lore: Ledger page for Copper Row shows payments for silence after child vanished.'
+  };
+  for (const k in expansions) {
+    if (ITEM_CATALOG[k]) {
+      if (ITEM_CATALOG[k].desc.indexOf('Lore:') <0) {
+        ITEM_CATALOG[k].desc += ' ' + expansions[k];
+      }
+    }
+  }
+}
+expandItemDescWithLore();
+
+// Initialize lore unlocked based on state
+function initLoreState(s) {
+  if (!s) return;
+  s.flags = s.flags || {};
+  s.flags.loreUnlocked = s.flags.loreUnlocked || {};
+  // Always unlock foundation
+  s.flags.loreUnlocked['virelia_founded'] = true;
+  s.flags.loreUnlocked['crossroads'] = true;
+  s.flags.loreUnlocked['bandit'] = true;
+  s.flags.loreUnlocked['fighter'] = true;
+  s.flags.loreUnlocked['rogue'] = true;
+  s.flags.loreUnlocked['mage'] = true;
+  s.flags.loreUnlocked['cleric'] = true;
+  s.flags.loreUnlocked['ranger'] = true;
+}
+
+// Hook normalize
+const _origNormLore = typeof normalizeState === 'function' ? normalizeState : null;
+function normalizeStateLore(s) {
+  if (_origNormLore) _origNormLore(s);
+  if (!s) return;
+  initLoreState(s);
+  // Unlock based on flags
+  if (s.flags && s.flags.worldState) {
+    const ws = s.flags.worldState;
+    if (ws.sunVault < 80) unlockLore('sun_vault');
+    if (ws.wildsSpread > 30) unlockLore('wilds');
+    if (ws.plague > 0) unlockLore('plague');
+    if (ws.doppelgangerRumor) unlockLore('doppelganger');
+  }
+  if (s.inventory) {
+    for (const k in s.inventory) unlockLore(k);
+  }
+  if (s.roam && s.roam.v2 && s.roam.v2.current) unlockAreaLore(s.roam.v2.current);
+}
+try { normalizeState = normalizeStateLore; } catch(e){}
+if (typeof window !== 'undefined') window.normalizeState = normalizeStateLore;
+
+console.log('[VIRELIA LORE] Loaded. Codex entries:', Object.keys(LORE_FLAT).length);
+function loreSanity() {
+  return {
+    total: Object.keys(LORE_FLAT).length,
+    unlocked: state && state.flags && state.flags.loreUnlocked && Object.keys(state.flags.loreUnlocked).length || 0,
+    categories: Object.keys(LORE_CODEX).length
+  };
+}
+if (typeof window !== 'undefined') window.loreSanity = loreSanity;
+/* VIRELIA V2 - 3-ACT MAIN STORYLINE
+   Act 1: The Sealed Letter (Arrival, Investigation, First Betrayal)
+   Act 2: The Crack Widens (Vault, Factions, Doppelganger, Hollow Child)
+   Act 3: The Siege (Overlord reveal, 4 endings)
+   Tone: Mix - Dark Gritty + Heroic + Weird Mystery
+   Every choice has consequence, twist table used
+*/
+
+console.log('[VIRELIA STORY] Loading 3-act main storyline...');
+
+const ACT_FLAGS = {
+  act1_letter_done: 'act1:letter_done',
+  act1_cellar_done: 'act1:cellar_done',
+  act1_ledger_faction: 'act1:ledger_faction',
+  act1_betrayed: 'act1:betrayed',
+  act2_vault_stared: 'act2:vault_stared',
+  act2_vault_sealed_once: 'act2:vault_sealed_once',
+  act2_debt_taken: 'act2:debt_taken',
+  act2_debt_paid: 'act2:debt_paid',
+  act2_doppel_found: 'act2:doppel_found',
+  act2_hollow_met: 'act2:hollow_met',
+  act3_siege_omen: 'act3:siege_omen',
+  act3_keeper_offer: 'act3:keeper_offer'
+};
+
+function setActFlag(key, value) {
+  if (!state) return;
+  state.flags = state.flags || {};
+  state.flags[key] = (typeof value === 'undefined') ? true : value;
+}
+function getActFlag(key) {
+  if (!state || !state.flags) return undefined;
+  return state.flags[key];
+}
+
+function actLogConsequence(text, severity) {
+  ConsequenceEngine.logConsequence('act_' + Date.now(), text, severity || 'major');
+}
+
+/* ACT 1 EXPANDED NODES */
+function injectAct1() {
+  if (typeof STORY === 'undefined') return;
+
+  // Override courier to start Act 1 properly with lore
+  STORY.courier.text = function(s) {
+    unlockLore('virelia_founded');
+    return `A courier in soot-stained gloves waits beside the board. His left hand is wrapped — burn from vault light, you recognize from Lys's warnings.\n\n"For you. Sealed. Don't open near lanterns. Light reads ink."\n\nThe wax seal is blue, but someone pressed a thumb into it — rebel sign? Or warning?\n\nGold: ${s.gold} | Reputation Guild ${s.reputation.Guild} Crown ${s.reputation.Crown} Rebels ${s.reputation.Rebels}`;
+  };
+  STORY.courier.choices = function(s) {
+    return [
+      {
+        label: "Take the sealed letter (investigate)",
+        next: "act1_letter_open",
+        effect: function() {
+          setActFlag(ACT_FLAGS.act1_letter_done, true);
+          s.arcs.investigation = { stage: 1, startedDay: s.world.day };
+          addInvItem(s, "sealed_letter", 1);
+          unlockLore('sealed_letter');
+          appendLog("You take letter. Wax still warm. Inside list of names — people paid to disappear. Last name is yours, but crossed out.");
+          appendLog("Key item: Sealed Letter. [LORE UNLOCKED] Foundation");
+          openItemModal("sealed_letter");
+          setActFlag('heardRumors', true);
+          adjustNpc('mara_crossroads', 1, 'Took the letter others refused');
+        }
+      },
+      {
+        label: "Ask who sent it (Cunning check)",
+        next: "act1_letter_ask",
+        check: { stat: "cunning", base: 0.45, per: 0.05 },
+        success: {
+          text: "Courier flinches: 'Factor Brine. But not Guild coin. Debt coin. He owes someone who owns vault.' That is worse than Guild.",
+          effect: function() {
+            adjustReputation("Guild", -1);
+            s.gold += 3;
+            appendLog("You get 3 gold for reading his fear, but Guild -1. He whispers: cellar under lantern shop has real ledger, not copy.");
+            setActFlag("lantern_hint", true);
+          }
+        },
+        fail: {
+          text: "'Don't. You don't want to know who writes with that ink.' He leaves, but you feel watched.",
+          effect: function() {
+            ConsequenceEngine.applyConsequence(s, 'steal', 0.5);
+            setActFlag("watchHeat", (s.flags.worldState && s.flags.worldState.watchHeat || 0) + 2);
+          }
+        }
+      },
+      {
+        label: "Refuse (keep head down)",
+        className: "secondary",
+        next: "crossroads",
+        effect: function() {
+          setActFlag("messengerDone", true);
+          actLogConsequence("Refused sealed letter. Courier disappeared next day. WatchHeat+2", "info");
+          ConsequenceEngine.worldState(s).watchHeat = Math.min(100, ConsequenceEngine.worldState(s).watchHeat + 2);
+          appendLog("You refuse. Courier shrugs, but rumor spreads you were afraid. Mara notes it.");
+          adjustNpc('mara_crossroads', -1, 'Refused courier task');
+        }
+      }
+    ];
+  };
+
+  STORY.act1_letter_open = {
+    text: function(s) {
+      return `You open letter away from lanterns as warned. In daylight ink is brown list. In shadow, second ink appears — written with ember_gem dust, only visible in dark.\n\nBrown ink: 7 names, amounts paid, dates. All disappeared last year. Third name: Korg's daughter.\n\nHidden ink: 'They pay to make people who saw vault crack forget. The vault didn't crack. It was cut. Bring this to Crossroads at midnight. Burn after.'\n\nThe letter is addressed to you, but you have never been to Virelia before today. Or have you? A memory itch — you recall lantern shop smell, but you have never entered.\n\n${state.flags.lanternhint ? "\nCourier hint: Real ledger in lantern-shop cellar, not this copy." : ""}`;
+    },
+    choices: function(s) {
+      return [
+        { label: "Go to lantern-shop cellar (Follow hidden ink)", next: "act1_cellar" },
+        { label: "Show letter to Mara", next: "act1_mara_letter", effect: function(){ unlockLore('mara'); } },
+        { label: "Show letter to Korg (his daughter listed)", next: "act1_korg_letter", effect: function(){ unlockLore('korg_blacksmith'); } },
+        { label: "Burn letter as instructed", next: "crossroads", effect: function(){
+          consumeInvItem(s,"sealed_letter",1);
+          setActFlag("act1:burned_letter", true);
+          ConsequenceEngine.applyConsequence(s, 'show_mercy', 1);
+          appendLog("You burn letter. Ash smells like hair. That night you dream of writing it, 2 years ago. Unlocks Lore: Doppelganger Rumor.");
+          unlockLore('doppelganger');
+          s.flags.worldState.doppelgangerRumor = true;
+          addInvItem(s, "letter_to_self", 1);
+        }},
+        { label: "Keep letter, return later", className:"secondary", next:"crossroads" }
+      ];
+    }
+  };
+
+  STORY.act1_letter_ask = {
+    text: function(s){ return "The courier is gone. Low Streets feel tighter. A child watches you from roof, holding doll."; },
+    choices: [{ label:"Back to Crossroads", next:"crossroads" }]
+  };
+
+  STORY.act1_mara_letter = {
+    text: function(s){
+      return `Mara reads brown ink, not hidden. Says: "Third name is Korg's girl. She coughed light. He blames vault. But this ledger — payments from Guild weighing house. Someone paid to forget her. Not Guild coin though. Debt coin. Blue wax with thumb. That's debt marker."
+
+She looks at hidden ink under table shadow, pales: "This second handwriting is yours. I saw you write like this two winters ago, when you stayed at shrine and said you were leaving and never returning. You did return. You just don't remember."
+
+Consequence: Mara affinity -1 if you doubt her, +2 if you believe.`;
+    },
+    choices: function(s){
+      return [
+        { label:"Believe Mara (Weird Mystery)", next:"act1_cellar", effect:function(){ adjustNpc('mara_crossroads',2,'Believed her about past life'); setActFlag('believed_mara',true); unlockLore('doppelganger'); s.flags.worldState.doppelgangerRumor=true; }},
+        { label:"Doubt Mara (Guild logic)", next:"act1_cellar", effect:function(){ adjustNpc('mara_crossroads',-1,'Doubted her memory'); ConsequenceEngine.applyConsequence(s,'betray_guild',0.5); }},
+        { label:"Ask about thumb seal", next:"act1_debt_lore", effect:function(){ unlockLore('debt_marker'); } }
+      ];
+    }
+  };
+
+  STORY.act1_korg_letter = {
+    text: function(s){
+      return `Korg reads daughter's name, hammer drops. Forge goes quiet.
+
+"She coughed. Said light hurt. Then men in blue gloves came, weighed her cough like grain. Paid me 20 gold. Debt marker. Said forget."
+
+He shows you tin with blue wax — debt_marker_guild. Same wax as letter.
+
+"I signed. I took gold. I bought her medicine that didn't work. You want ledger? In lantern shop cellar. I tried to get. Locked. Key with lantern keeper who disappeared."
+
+He looks at you: "If you find who cut vault, you bring me hammer."
+
+If you have debt_marker_guild, he spits: "You signed too?"
+
+Affinity: Korg +3 if you promise revenge, -2 if you say gold was right.`;
+    },
+    choices: function(s){
+      return [
+        { label:"Promise revenge (Fighter path)", next:"act1_cellar", effect:function(){ adjustNpc('korg_blacksmith',3,'Promised revenge for daughter'); setActFlag('korg_promise',true); s.flags.korgPromise=true; }},
+        { label:"Say coin was survival (Guild path)", next:"act1_cellar", effect:function(){ adjustNpc('korg_blacksmith',-2,'Said gold was right choice'); adjustReputation('Guild',1); }},
+        { label:"Give him 10 gold for forgiveness", next:"act1_cellar", disabled: (s.gold||0)<10, effect:function(){ spendGold(10); adjustNpc('korg_blacksmith',2,'Gave 10g for daughter'); ConsequenceEngine.applyConsequence(s,'show_mercy',1); }},
+        { label:"Back", className:"secondary", next:"crossroads" }
+      ];
+    }
+  };
+
+  STORY.act1_debt_lore = {
+    text: function(s){
+      return `Debt markers: Guild gives 100g now, collects favor later. Always worse than gold. Factor Brine collects.
+
+Mechanics in Act 2 will trigger: Day 10-15 after taking, Brine appears, demands 150g or steal from Rebels or refuse (Guild -5 economy -10% bandits spawn). Day 35 ambush 2 sellswords in Low Streets.
+
+Mara: "If you have marker, you already in Act 2."
+
+You don't have one yet — unless Korg gave you his.`;
+    },
+    choices: [{ label:"Back", next:"act1_mara_letter" }]
+  };
+
+  // Enhanced cellar with consequence and hollow child cameo
+  STORY.act1_cellar = {
+    text: function(s){
+      return `Lantern-shop cellar. Oil smell, wet stone. Locked hatch, second door behind crates. Ledger on table, quill still wet. Small oil-scented key on hook — lantern_cellar_key.
+
+But also: child's doll on floor, same as hollow_child_doll. And fresh footprints size yours, exiting.
+
+Someone was here minutes ago, writing ledger you came to steal. Twist: ledger is fake? Or you wrote it?
+
+You hear boots above — guard shift change in 2 minutes.`;
+    },
+    choices: function(s){
+      return [
+        {
+          label: "Stakeout (Cunning safer)",
+          check: { stat:"cunning", base:0.55, per:0.04 },
+          success: {
+            text: "You wait, slip in shift change, find ledger + key + doll. Also find scrap in YOUR handwriting: 'Don't let them seal. Let it crack, let it remember.' You pocket it, confused.",
+            effect: function(){
+              s.arcs.investigation.stage=3;
+              addInvItem(s,"ledger",1); addInvItem(s,"lantern_cellar_key",1); addInvItem(s,"hollow_child_doll",1);
+              setActFlag(ACT_FLAGS.act1_cellar_done,true);
+              unlockLore('ruins'); unlockLore('doll'); setActFlag('act1:found_self_scrap',true);
+              appendLog("Gained Ledger, Key, Doll. Also scrap hints you sabotaged vault before? Lore: Doppelganger");
+              openItemModal("ledger");
+              adjustNpc('mara_crossroads',1,'Found cellar ledger quietly');
+            }
+          },
+          failForward: {
+            text: "You get ledger but runner spots you. You escape with ledger under coat, doll falls — you grab it anyway. Guard yells your name, but wrong name — name you used 2 years ago, according to Mara.",
+            effect: function(){
+              s.arcs.investigation.stage=3;
+              addInvItem(s,"ledger",1); addInvItem(s,"hollow_child_doll",1);
+              setActFlag("investigationHeat", (getActFlag("investigationHeat")||0)+1);
+              applyDamage(4);
+              ConsequenceEngine.worldState(s).watchHeat+=3;
+            }
+          },
+          fail: { text:"Watcher spots you, you retreat.", effect:function(){ applyDamage(6); } },
+          next: "act1_ledger_decision"
+        },
+        {
+          label: "Break in (Strength risky)",
+          check: { stat:"strength", base:0.48, per:0.04 },
+          success: {
+            text:"Wood splinters. You grab ledger + key. Doll's eyes follow you.",
+            effect: function(){ s.arcs.investigation.stage=3; addInvItem(s,"ledger",1); addInvItem(s,"lantern_cellar_key",1); setActFlag(ACT_FLAGS.act1_cellar_done,true); unlockLore('doll'); }
+          },
+          failForward: {
+            text:"Hatch cracks loud. You snatch ledger as boots thunder.",
+            effect: function(){ s.arcs.investigation.stage=3; addInvItem(s,"ledger",1); setActFlag("investigationHeat",(getActFlag("investigationHeat")||0)+1); addEffect("bleeding", 12000); applyDamage(6); }
+          },
+          fail: { text:"Hatch holds, guard clips you.", effect:function(){ applyDamage(10); } },
+          next: "act1_ledger_decision"
+        },
+        {
+          label: "Scry (Arcana costs 6 mana)",
+          require: function(s){ if(s.mana<6){ appendLog("Low mana"); return false;} s.mana-=6; return true; },
+          check: { stat:"arcana", base:0.50, per:0.05 },
+          success: {
+            text:"Ink lifts in mind. Names, routes, payments. You copy key entries and pocket ledger. You also see who cut vault — silhouette wearing your cloak.",
+            effect: function(){ s.arcs.investigation.stage=3; addInvItem(s,"ledger",1); setActFlag('act2:stared_vault_silhouette',true); unlockLore('sun_vault'); }
+          },
+          failForward: {
+            text:"Vision shows enough but leaves trace someone skilled might follow. Vael will know you scried.",
+            effect: function(){ s.arcs.investigation.stage=3; addInvItem(s,"ledger",1); setActFlag("investigationHeat",(getActFlag("investigationHeat")||0)+1); addEffect("cursed", 10000); adjustNpc('vael_enchanter',1,'Scried cellar'); }
+          },
+          fail: { text:"Vision fractures and bites.", effect:function(){ addEffect("cursed", 12000); applyDamage(8); } },
+          next: "act1_ledger_decision"
+        },
+        { label:"Leave (too risky)", className:"secondary", next:"crossroads" }
+      ];
+    }
+  };
+
+  STORY.act1_ledger_decision = {
+    text: function(s){
+      return `You have ledger. Real one, not copy courier gave? Pages show payments for forgetting:
+
+- Korg's daughter: 20g debt marker
+- Gate guard: 15g
+- Weaver who saw light stutter: 30g + threat
+- You: 0g? Entry crossed out "Did not take gold. Will remember. Must cut again if needed."
+
+Last entry is your name, with note: "Will remember." Means you refused payment before to forget vault cut. So you chose to remember and they tried to make you forget, but you remembered again?
+
+Who do you trust ledger with? Choice will change economy, powers, and unlock Act 2 debt.
+
+Your current rep: Guild ${s.reputation.Guild} Rebels ${s.reputation.Rebels} Crown ${s.reputation.Crown}`;
+    },
+    choices: function(s){
+      return [
+        {
+          label:"Deliver to Guild (order + coin) - Guild+2 Rebels-1",
+          next:"act1_ledger_guild",
+          effect: function(){
+            // already handled in original investigate_report but expand
+          }
+        },
+        {
+          label:"Deliver to Rebels (freedom + risk) - Rebels+2 Crown-1",
+          next:"act1_ledger_rebels"
+        },
+        {
+          label:"Deliver to Crown (law) - Crown+2 Rebels-1 + watchHeat",
+          next:"act1_ledger_crown"
+        },
+        {
+          label:"Burn ledger, keep truth (Wilds+1, economy stable, but all factions -1, unlocks weird path)",
+          next:"crossroads",
+          effect: function(){
+            consumeInvItem(s,"ledger",1);
+            setActFlag(ACT_FLAGS.act1_ledger_faction,'burned');
+            adjustReputation('Guild',-1); adjustReputation('Rebels',-1); adjustReputation('Crown',-1);
+            ConsequenceEngine.worldState(s).wildsSpread+=1;
+            ConsequenceEngine.worldState(s).economy=Math.min(100, ConsequenceEngine.worldState(s).economy+2);
+            actLogConsequence("Burned ledger. No faction trusted. Wilds+1 economy+2. You chose no masters. Act1 burned path.",'major');
+            addInvItem(s,"debt_marker_guild",1); // you get debt marker as ash that is still readable? twist: burning creates marker
+            s.arcs.investigation.stage=4;
+            appendLog("Ledger burns with blue flame. Ash forms debt marker tin. You now owe Guild 100g you didn't take.");
+          }
+        }
+      ];
+    }
+  };
+
+  STORY.act1_ledger_guild = {
+    text: function(s){ return `Factor Brine weighs ledger, nods. "Order kept." He slides 30g + Sigil, but his gloves leave ash on your hand.\n\n"Debt marker we gave Korg is now yours too, because you brought proof we paid. Fair?" He presses tin into palm — you didn't agree but you have debt_marker_guild now.\n\nMara later: "You gave truth to those who sell it. City will pay."`; },
+    choices: function(s){
+      return [{
+        label:"Accept (Act1 ends, Act2 debt begins)",
+        next:"crossroads",
+        effect:function(){
+          setActFlag(ACT_FLAGS.act1_ledger_faction,'Guild');
+          adjustReputation('Guild',2); adjustReputation('Rebels',-1);
+          s.gold+=30; addInvItem(s,'sigil_of_the_guildmaster',1); addInvItem(s,'debt_marker_guild',1);
+          s.arcs.investigation.stage=4;
+          setActFlag(ACT_FLAGS.act2_debt_taken,true);
+          setActFlag('debt_taken_day', s.world.day);
+          ConsequenceEngine.applyConsequence(s,'betray_guild',1);
+          actLogConsequence('Gave ledger to Guild. Got sigil + debt marker. Economy -10% in 5 days.','major');
+          openItemModal('sigil_of_the_guildmaster');
+        }
+      }];
+    }
+  };
+
+  STORY.act1_ledger_rebels = {
+    text: function(s){ return `Rebel runner in dock shadow reads ledger, grins with too many teeth. "Guild paid to make us forget our dead. Good."
+
+He gives 26g + commander band, but says: "Now you are marked. Guild will send collectors. Also — that last entry, you refusing gold? That was you, two years ago. You were one of us, then you left. We wondered where you went."
+
+He presses blood oath tin: sign in blood, Rebels+3 Crown-2, unlocks Oathbreaker if you later betray.
+
+Mara: "Freedom is expensive, you just bought some."`; },
+    choices: function(s){
+      return [{
+        label:"Sign Blood Oath (Act1 ends, Rebels path)",
+        next:"crossroads",
+        effect:function(){
+          setActFlag(ACT_FLAGS.act1_ledger_faction,'Rebels');
+          adjustReputation('Rebels',2); adjustReputation('Crown',-1);
+          s.gold+=26; addInvItem(s,'rebel_commander_band',1); addInvItem(s,'rebels_blood_oath',1);
+          s.arcs.investigation.stage=4;
+          ConsequenceEngine.applyConsequence(s,'show_mercy',1);
+          actLogConsequence('Gave ledger to Rebels. Got band + blood oath. WatchHeat+2','major');
+          ConsequenceEngine.worldState(s).watchHeat+=2;
+          openItemModal('rebel_commander_band');
+        }
+      },{
+        label:"Take band but refuse oath (neutral)",
+        next:"crossroads",
+        effect:function(){
+          setActFlag(ACT_FLAGS.act1_ledger_faction,'Rebels');
+          adjustReputation('Rebels',1);
+          s.gold+=26; addInvItem(s,'rebel_commander_band',1);
+          s.arcs.investigation.stage=4;
+        }
+      }];
+    }
+  };
+
+  STORY.act1_ledger_crown = {
+    text: function(s){ return `Crown clerk reads, crisp nod. "Writ filed." Gives 28g + amulet, but also says: "You are now witness. If vault case goes trial, you testify. Refuse = Crown -5."
+
+Clerk adds: "Entry with your name crossed out — we have record you were paid 0g to forget, but you didn't forget. That makes you unreliable witness. We will watch."
+
+WatchHeat+5 immediately. Crown likes law, not truth.
+
+Mara: "Law without mercy is another gang."`; },
+    choices: function(s){
+      return [{
+        label:"Accept witness duty (Crown path)",
+        next:"crossroads",
+        effect:function(){
+          setActFlag(ACT_FLAGS.act1_ledger_faction,'Crown');
+          adjustReputation('Crown',2); adjustReputation('Rebels',-1);
+          s.gold+=28; addInvItem(s,'amulet_of_unbroken_oath',1);
+          s.arcs.investigation.stage=4;
+          ConsequenceEngine.worldState(s).watchHeat+=5;
+          actLogConsequence('Gave ledger to Crown. Now witness, watchHeat+5.','major');
+          openItemModal('amulet_of_unbroken_oath');
+        }
+      }];
+    }
+  };
+}
+
+function injectAct2() {
+  if (typeof STORY === 'undefined') return;
+
+  STORY.act2_vault_entrance = {
+    text: function(s){
+      const ws = ConsequenceEngine.worldState(s);
+      return `Vault Approach: Light heavy, teeth ache. Air hums. Guards gone — Crown abandoned post when first guard eyes burned white.\n\nWorld: SunVault ${ws.sunVault}% Wilds ${ws.wildsSpread}% Plague ${ws.plague}\n\nYou have ${s.inventory && s.inventory.sun_vault_shard || 0} shards. At vault you can:\n- Stare (gain shard + Void Sight but wilds+1, flag looked_into_vault, doppel rumor)\n- Seal with shard (consume: vault+5 wilds-5 plague-2 Crown+1 economy+3)\n- Leave\n\nDecision echoes. Korg's hammer if promised still waits.`;
+    },
+    choices: function(s){
+      return [
+        {
+          label:"Stare into Vault (weird mystery)",
+          next:"act2_vault_stare",
+          effect: function(){}
+        },
+        {
+          label:"Seal breach with shard (requires shard)",
+          disabled: !(s.inventory && s.inventory.sun_vault_shard),
+          next:"crossroads",
+          effect:function(){
+            if (!consumeInvItem(s,"sun_vault_shard",1)) { appendLog("No shard"); return; }
+            ConsequenceEngine.applyConsequence(s,'seal_vault',1);
+            adjustReputation('Crown',1);
+            s.gold+=5;
+            setActFlag(ACT_FLAGS.act2_vault_sealed_once,true);
+            unlockLore('sun_vault');
+            actLogConsequence('Sealed breach with shard. Vault+5 wilds-5','major');
+            appendLog("Light steadies. For now.");
+            if ((s.flags.worldState.sunVault||0) >= 85) {
+              adjustNpc('korg_blacksmith',2,'Sealed vault');
+            }
+          }
+        },
+        {
+          label:"Leave",
+          className:"secondary",
+          next:"crossroads"
+        }
+      ];
+    }
+  };
+
+  STORY.act2_vault_stare = {
+    text: function(s){
+      return `You stare. Light is not light. It is lattice of second hands, all ticking different times. In lattice you see:
+
+- Yourself, older, wearing Crown of Thorns, sitting on bell at Crossroads, watching yourself now.
+- Korg's daughter, coughing, but cough spells word in light language: "CUT"
+- Mara's crate, but crate is open, inside another city's bell
+- The hollow child, but child is you, age 8
+
+Light burns memory. You get shard + Void Sight mix skill unlock, but:
+
+- Wilds+1, plague+1
+- Flag looked_into_vault true
+- Doppelganger rumor true
+- Vael will now trade True Sight
+
+You also find scrap: "Don't let them seal. Let it remember." Same handwriting as letter to self. Means you previously wanted vault to stay cracked?
+
+Twist: Are you trying to seal or keep open?`;
+    },
+    choices: function(s){
+      return [
+        {
+          label:"Accept vision, take shard (Void Sight unlocks)",
+          next:"crossroads",
+          effect:function(){
+            if (!s.flags['consequence:looked_into_vault']) {
+              addInvItem(s,'sun_vault_shard',1);
+              ConsequenceEngine.applyConsequence(s,'wilds_deal',1);
+              ConsequenceEngine.worldState(s).plague+=1;
+              s.flags['consequence:looked_into_vault']=true;
+              s.flags.worldState.doppelgangerRumor=true;
+              s.flags.doppelgangerRumor=true;
+              setActFlag(ACT_FLAGS.act2_vault_stared,true);
+              unlockLore('sun_vault'); unlockLore('doppelganger'); unlockLore('void_sight');
+              addInvItem(s,'letter_to_self',1);
+              actLogConsequence('Stared into Vault. Shard+ Void Sight. Doppelganger rumor.','major');
+              s.mana = Math.max(0, (s.mana||0)-2);
+              s.hp = Math.max(1, (s.hp||0)-2);
+              appendLog("HP-2 Mana-2 from light burn. Void Sight mix skill now available if Lv6.");
+            }
+          }
+        },
+        {
+          label:"Look away, refuse knowledge (Resilience check)",
+          check:{ stat:"resilience", base:0.5, per:0.04 },
+          success:{
+            text:"You look away, eyes watering. You keep some self.",
+            effect:function(){ addEffect('shielded',15000); appendLog("Shielded 15s for resisting."); },
+            next:"crossroads"
+          },
+          fail:{
+            text:"You try to look away but light holds eyes. Same as above, but cursed 20s.",
+            effect:function(){ addEffect('cursed',20000); if (!s.flags['consequence:looked_into_vault']) { addInvItem(s,'sun_vault_shard',1); ConsequenceEngine.applyConsequence(s,'wilds_deal',1); s.flags['consequence:looked_into_vault']=true; } },
+            next:"crossroads"
+          },
+          next:"crossroads"
+        }
+      ];
+    }
+  };
+
+  STORY.act2_debt_collector = {
+    text: function(s){
+      const dayTaken = getActFlag('debt_taken_day') || s.world.day;
+      const days = s.world.day - dayTaken;
+      return `Factor Brine, blue gloves, stands at Crossroads bell where Mara usually sits. Mara not here — moved, says city not safe for old keepers when debt unpaid.\n\n"Time," Brine says. "100 gold became 150. Or favor. Or I take something you like."
+
+Days since debt: ${days}. Guild Power ${ConsequenceEngine.worldState(s).guildPower}.
+
+If you have debt_marker_guild, you owe.
+
+Choices have consequence: Pay, steal from Rebels, refuse.
+
+Refuse = Guild -5 economy -10% bandits spawn as collectors in Low Streets until paid. Also Korg +25% prices until debt cleared, because Guild tells smiths not to serve debtors.
+
+This is Act 2 debt consequence.`;
+    },
+    choices: function(s){
+      return [
+        {
+          label:"Pay 150g (if have)",
+          disabled: (s.gold||0)<150,
+          next:"crossroads",
+          effect:function(){
+            spendGold(150); consumeInvItem(s,"debt_marker_guild",1);
+            setActFlag(ACT_FLAGS.act2_debt_paid,true);
+            adjustReputation('Guild',1);
+            ConsequenceEngine.worldState(s).economy = Math.min(100, ConsequenceEngine.worldState(s).economy+5);
+            actLogConsequence('Paid Guild debt 150g. Economy+5 Guild+1.','major');
+            appendLog("Brine nods, leaves. Mara returns next day.");
+          }
+        },
+        {
+          label:"Do favor: Steal ledger from Rebels (betray Rebel path)",
+          next:"crossroads",
+          effect:function(){
+            // Give mission to steal
+            setActFlag('debt_favor_rebels',true);
+            addInvItem(s,"rebel_token",1); // fake token to trick rebels
+            adjustReputation('Rebels',-2); adjustReputation('Guild',1);
+            ConsequenceEngine.applyConsequence(s,'betray_guild',0.5); // ironically betray rebels = help guild
+            actLogConsequence('Took Guild favor: steal from Rebels. Rebels -2 Guild+1. Must deliver fake token.','major');
+            s.flags.debtFavor = 'rebels';
+            appendLog("Brine gives fake rebel token to plant. If caught, Rebels -5.");
+          }
+        },
+        {
+          label:"Refuse (Guild -5 economy -10% collectors spawn)",
+          next:"crossroads",
+          effect:function(){
+            adjustReputation('Guild',-5);
+            ConsequenceEngine.worldState(s).economy = Math.max(5, ConsequenceEngine.worldState(s).economy-10);
+            ConsequenceEngine.worldState(s).watchHeat = Math.min(100, ConsequenceEngine.worldState(s).watchHeat+5);
+            setActFlag('debt_refused',true);
+            actLogConsequence('Refused Guild debt. Guild -5 economy -10% Low Streets now has collectors (Bandits tier3).','major');
+            // Spawn collectors via flag handled in roamMaybeEncounter
+            s.flags.guildCollectors=true;
+          }
+        },
+        {
+          label:"Burn marker at vault with ember_gem (Debt gone Guild-3 Crown+1)",
+          disabled: !(s.inventory && s.inventory.ember_gem && s.inventory.debt_marker_guild),
+          next:"crossroads",
+          effect:function(){
+            consumeInvItem(s,"ember_gem",1); consumeInvItem(s,"debt_marker_guild",1);
+            adjustReputation('Guild',-3); adjustReputation('Crown',1);
+            setActFlag(ACT_FLAGS.act2_debt_paid,true);
+            actLogConsequence('Burned debt marker at vault. Guild -3 Crown+1. Debt gone.','major');
+            appendLog("Marker burns blue. Ash spells 'paid' then 'not paid' then 'paid' flickering.");
+          }
+        }
+      ];
+    }
+  };
+
+  // Hook to trigger debt collector day 10-15
+  const _origWorldTick = typeof worldTick === 'function' ? worldTick : null;
+  function worldTickAct2(actionLabel) {
+    if (_origWorldTick) _origWorldTick(actionLabel);
+    if (!state) return;
+    const takenDay = getActFlag('debt_taken_day');
+    if (takenDay && !getActFlag(ACT_FLAGS.act2_debt_paid) && !getActFlag('debt_refused')) {
+      const days = (state.world.day||1) - takenDay;
+      if (days >=10 && days <=15 && !state.world.pendingEvent && Math.random()<0.35) {
+        state.world.pendingEvent = {
+          kind: 'debt',
+          fromNode: state.nodeId||'crossroads',
+          title: 'Debt Collector',
+          text: 'Factor Brine wants debt. Go to Crossroads.'
+        };
+        // Force enter debt node via crossroads check? We'll make crossroads detect
+        appendLog('[EVENT] Debt collector at Crossroads. Check Crossroads.');
+      }
+    }
+    // Hollow child vanishes if wilds>50
+    if (state.flags && state.flags.worldState && state.flags.worldState.wildsSpread>50 && Math.random()<0.05) {
+      if (!state.flags.hollow_vanished) {
+        state.flags.hollow_vanished=true;
+        appendLog('[WORLD] Wilds 50%+: Hollow Child vanishes from ruins. Doll cries at night.');
+      }
+    }
+  }
+  try { worldTick = worldTickAct2; } catch(e){}
+  if (typeof window !== 'undefined') window.worldTick = worldTickAct2;
+
+  // Add debt collector detection in crossroads
+  if (STORY.crossroads && STORY.crossroads.choices) {
+    const origCrossChoices = STORY.crossroads.choices;
+    STORY.crossroads.choices = function(s){
+      const base = origCrossChoices(s);
+      const takenDay = getActFlag('debt_taken_day');
+      if (takenDay && !getActFlag(ACT_FLAGS.act2_debt_paid)) {
+        const days = (s.world.day||1) - takenDay;
+        if (days>=10) {
+          base.unshift({ label:'[DEBT] Face Factor Brine (Guild debt '+days+' days overdue)', next:'act2_debt_collector' });
+        }
+      }
+      // Add vault entrance if not yet stared
+      if (!getActFlag(ACT_FLAGS.act2_vault_stared)) {
+        base.unshift({ label:'Go to Sun Vault Approach (Act2)', next:'act2_vault_entrance' });
+      } else {
+        base.unshift({ label:'Return to Vault (seal/stare)', next:'act2_vault_entrance' });
+      }
+      return base;
+    };
+  }
+
+  // Hollow Child expanded Act2
+  STORY.act2_hollow_meet = {
+    text: function(s){
+      return `Ruins. Child sits where doll was. Same height as you at 8? Face blank like uncarved wood.
+
+"Did you keep doll?"
+
+You have doll? ${s.inventory && s.inventory.hollow_child_doll ? 'Yes' : 'No'}
+
+WildsSpread ${ConsequenceEngine.worldState(s).wildsSpread}%.
+
+Child says: "We tried to be you but made child shape wrong. Vault is mouth. We are food? Or you are food and we are mouth?"
+
+Choice: Give doll back, keep, burn, or ask Vael.
+
+This is Act2 hollow arc. Consequence: keeping teaches Wild Hunt skill easier, but plague+.
+
+Mara says child is bait. Lys says doll is root wrapped cloth. Vael says child is wilds attempt at human.
+
+Who do you believe?`;
+    },
+    choices: function(s){
+      return [
+        { label:"Give doll back (Wilds -2, child stays)", next:"crossroads", effect:function(){
+          if (consumeInvItem(s,"hollow_child_doll",1)) {
+            ConsequenceEngine.worldState(s).wildsSpread = Math.max(0, ConsequenceEngine.worldState(s).wildsSpread-2);
+            adjustReputation('Wilds',2);
+            actLogConsequence('Returned doll to Hollow Child. Wilds -2 Wilds+2. Child says thank you and vanishes for 3 days.','major');
+            setActFlag('hollow_returned',true);
+          }
+        }},
+        { label:"Keep doll (Wilds thinks success, whispers)", next:"crossroads", effect:function(){
+          adjustReputation('Wilds',1);
+          addEffect('cursed',10000); // whisper
+          actLogConsequence('Kept doll. Wilds+1? Actually Wilds thinks success, stays curious. +1 mana on rest but plague+1 per 3 rests.','info');
+        }},
+        { label:"Give to Lys to burn (wilds -2 doll gone, ends quest, Sageleaf x2)", next:"crossroads", disabled: (s.nodeId!=='market' && s.nodeId!=='alchemist'), effect:function(){
+          // Actually Lys is at market->alchemist, handle there, but allow here too
+          if (consumeInvItem(s,"hollow_child_doll",1)) {
+            ConsequenceEngine.worldState(s).wildsSpread=Math.max(0,ConsequenceEngine.worldState(s).wildsSpread-2);
+            addInvItem(s,'herb_sageleaf',2);
+            actLogConsequence('Gave doll to Lys to burn. Wilds -2, sageleaf+2, child quest ends.','major');
+            setActFlag('hollow_burned_by_lys',true);
+          }
+        }},
+        { label:"Burn at vault blue flame (wilds -3 + guilt, path to shard)", next:"act2_vault_entrance", effect:function(){
+          if (consumeInvItem(s,"hollow_child_doll",1)) {
+            ConsequenceEngine.worldState(s).wildsSpread=Math.max(0,ConsequenceEngine.worldState(s).wildsSpread-3);
+            setActFlag('hollow_burned_vault',true);
+            actLogConsequence('Burned doll at vault blue flame. Wilds -3 + guilt flag. Path to shard revealed.','major');
+            addInvItem(s,'sun_vault_shard',1);
+          }
+        }}
+      ];
+    }
+  };
+}
+
+function injectAct3() {
+  if (typeof STORY === 'undefined') return;
+
+  STORY.act3_omen = {
+    text: function(s){
+      const ws = ConsequenceEngine.worldState(s);
+      return `Act 3 Omen: Day ${s.world.day}. World total power Guild${ws.guildPower}+Crown${ws.crownPower}+Rebels${ws.rebelPower}=${ws.guildPower+ws.crownPower+ws.rebelPower}. Wilds ${ws.wildsSpread}%.
+
+Mara at Crossroads, crate empty: "Bell will ring without ringer. Means siege. When city powers fight each other more than wilds, wilds walks in."
+
+She shows you old bell rope: "Overlord comes from those who wore Crown of Thorns too long. Or from you, if you stared too long. Same thing maybe."
+
+Check: If wilds>40 or total powers<100 and level>=50, siege soon. Level 60+ triggers even if high powers (final test).
+
+You have choice: Prepare (buy charms, recruit party 3+ required for legendary), or Let it happen to see what city becomes (exile path).
+
+Siege is not failure — it's ending. How you face it determines ending.`;
+    },
+    choices: function(s){
+      return [
+        { label:"Prepare - Go to Market buy charms, Tavern recruit", next:"market" },
+        { label:"Scout siege area (Cunning check, reveals Overlord is you?)", next:"act3_omen_scout", check:{ stat:"cunning", base:0.5, per:0.04 },
+          success:{ text:"You scout. Overlord's banner is same as your cloak pattern, but older. Doppelganger? Or future you wearing Crown of Thorns?", effect:function(){ unlockLore('doppelganger'); setActFlag(ACT_FLAGS.act3_siege_omen,true); }, next:"crossroads" },
+          fail:{ text:"You see horde, not banner.", effect:function(){}, next:"crossroads" }
+        },
+        { label:"Back to Crossroads", className:"secondary", next:"crossroads" }
+      ];
+    }
+  };
+
+  STORY.act3_omen_scout = { text:function(s){ return "You scouted."; }, choices:[{ label:"Back", next:"crossroads"}] };
+
+  STORY.act3_endings = {
+    text: function(s){
+      const ws = ConsequenceEngine.worldState(s);
+      const lvl = s.level||1;
+      return `ACT 3 ENDINGS — Siege aftermath, Day ${s.world.day}\n\nWorld: Vault ${ws.sunVault}% Wilds ${ws.wildsSpread}% Plague ${ws.plague}\nFactions: G${ws.guildPower} C${ws.crownPower} R${ws.rebelPower}\nYour Rep: Guild ${s.reputation.Guild} Crown ${s.reputation.Crown} Rebels ${s.reputation.Rebels} Wilds ${s.reputation.Wilds}\n\nConsequence log entries: ${ (s.flags.consequenceLog||[]).length }\n\nTwist reveal: Overlord was ${ getActFlag('believed_mara') ? "former you who refused to forget, wearing Crown of Thorns for 2 years" : "Korg's daughter, grown, wearing Crown because she thought it would stop cough"}? Both can be true in wilds logic.\n\nChoose ending:`;
+    },
+    choices: function(s){
+      return [
+        {
+          label:"Ending SEAL: Use 3 shards to seal vault (requires 3 shards, sunVault+15 wilds-15, but you lose memory of Act1 - flags reset?)",
+          disabled: (s.inventory && s.inventory.sun_vault_shard || 0) <3,
+          next:"act3_ending_seal",
+        },
+        {
+          label:"Ending CRACK: Let vault crack fully, let wilds remember city (wildsSpread 100%, sunVault 0%, but plague ends, economy 100%, weird: city becomes forest with lanterns in trees)",
+          next:"act3_ending_crack"
+        },
+        {
+          label:"Ending KEEPER: Wear Crown of Thorns permanently, become new keeper, watchHeat 0, vault 100% but you can't leave Crossroads (game ends with you as NPC for next player? meta)",
+          disabled: !(s.inventory && (s.inventory.crown_of_thorns || s.equipment && (s.equipment.accessory1==='crown_of_thorns' || s.equipment.accessory2==='crown_of_thorns'))),
+          next:"act3_ending_keeper"
+        },
+        {
+          label:"Ending EXILE: Fail siege intentionally, go to exile_town keep skills lose coin (existing exile mechanic)",
+          next:"exile_town",
+          effect:function(){ actLogConsequence('Chose exile ending. Keep skills lose coin supplies.','major'); }
+        }
+      ];
+    }
+  };
+
+  STORY.act3_ending_seal = {
+    text: function(s){
+      return `You place 3 shards into crack. Light screams then steadies. Wilds recedes like tide.
+
+SunVault 100%? Let's see: ${ConsequenceEngine.worldState(s).sunVault}% -> should be +15.
+
+But: shards were futures that will never happen. By returning them, you return futures you stole. One of those futures was you remembering this moment. So you forget?
+
+Mechanic: Sealing costs memory. We will clear act1 flags (letter, cellar) but keep skills, keep world improved.
+
+Mara: "You sealed. City lives. You won't remember why it was worth it. That's keeper's price."
+
+Do you seal?`;
+    },
+    choices: function(s){
+      return [
+        {
+          label:"Seal (cost 3 shards, lose Act1 memory flags, vault+15 wilds-15 plague-5)",
+          next:"crossroads",
+          effect:function(){
+            if (!consumeInvItem(s,"sun_vault_shard",3)) { appendLog("Need 3 shards"); return; }
+            ConsequenceEngine.applyConsequence(s,'seal_vault',2);
+            s.flags.worldState.plague = Math.max(0, s.flags.worldState.plague-5);
+            // Clear some act1 flags to simulate memory loss
+            setActFlag(ACT_FLAGS.act1_letter_done,false);
+            setActFlag(ACT_FLAGS.act1_cellar_done,false);
+            setActFlag('act1:burned_letter',false);
+            actLogConsequence('ENDING SEAL: Vault sealed +15 wilds -15 plague -5. Lost memory of Act1 (flags cleared). Economy +10.','major');
+            s.flags.worldState.economy = Math.min(100, s.flags.worldState.economy+10);
+            gainXp(500);
+            addInvItem(s,'crown_of_the_sun_vault',1);
+            appendLog("Achievement: Light Keeper. Gain Crown of Sun Vault. You forget why you cried, but city breathes.");
+            unlockLore('sun_vault');
+          }
+        },
+        { label:"Don't seal (back)", className:"secondary", next:"act3_endings" }
+      ];
+    }
+  };
+
+  STORY.act3_ending_crack = {
+    text: function(s){
+      return `You step back. Let vault crack fully. Light spills like water breaking dam.
+
+Wilds does not consume city. It remembers city. Trees grow through market stalls, lanterns hang from branches. Plague ends because light no longer half — it's gone, so absence gone too.
+
+Mechanic: wildsSpread 100%, sunVault 0%, plague 0, economy 100% (new trade: herbs, root), watchHeat 0 (no Crown, no law).
+
+Mara: "We became forest with streets. Children will not cough, but they will not know stone either."
+
+Ending is weird, not good not bad. You become ranger path forever, unlock Wild Hunt easier. Twist: Hollow Child becomes permanent companion?`;
+    },
+    choices: function(s){
+      return [
+        {
+          label:"Let it crack (wilds 100% vault 0% plague 0% economy 100%)",
+          next:"crossroads",
+          effect:function(){
+            const ws = ConsequenceEngine.worldState(s);
+            ws.wildsSpread=100; ws.sunVault=0; ws.plague=0; ws.economy=100; ws.watchHeat=0;
+            ws.guildPower=20; ws.crownPower=10; ws.rebelPower=40; // new balance forest
+            actLogConsequence('ENDING CRACK: Let vault crack. Wilds 100 vault 0 plague 0 economy 100. City becomes forest with lanterns.','major');
+            addInvItem(s,'wilds_totem',1);
+            gainXp(500);
+            unlockLore('wilds');
+            appendLog("Achievement: Forest With Streets. Gain Wilds Totem. Ranger skills +20% forage.");
+          }
+        },
+        { label:"Back", className:"secondary", next:"act3_endings" }
+      ];
+    }
+  };
+
+  STORY.act3_ending_keeper = {
+    text: function(s){
+      return `You put Crown of Thorns on for good. Thorns grow inward, not outward. Whispers become voice you recognize — yours, older.
+
+You see all moments at once: You writing letter to self 2 years ago, you cutting vault, you being courier who gave letter to you. Cycle.
+
+Mechanic: Become keeper. WatchHeat 0 (guards fear you), vault 100% permanently, but you cannot leave Crossroads — every other location choice returns to Crossroads after 1 step. Game loops.
+
+Mara: "Now you are crate. People will sit on you and say you were always here."
+
+Ending is meta: Next player who creates profile with same name as you will find your keeper ghost? Could store ghost in localStorage?
+
+If you have Hollow Child Doll, child sits with you and stops crying.
+
+Do you keep crown on?`;
+    },
+    choices: function(s){
+      return [
+        {
+          label:"Become Keeper (vault 100% watch 0, stuck at Crossroads, but unlock Keeper for next playthrough)",
+          next:"crossroads",
+          effect:function(){
+            const ws = ConsequenceEngine.worldState(s);
+            ws.sunVault=100; ws.watchHeat=0; ws.plague=0;
+            setActFlag('keeper_ending',true);
+            actLogConsequence('ENDING KEEPER: Became keeper, vault 100% watch 0. Stuck at Crossroads loop. Meta: next profile same name sees ghost.','major');
+            // Store ghost
+            try {
+              const ghosts = JSON.parse(localStorage.getItem('virelia_keepers')||'[]');
+              ghosts.push({ name:s.profile, day:s.world.day, vault:100, text:'Keeper who chose thorns' });
+              localStorage.setItem('virelia_keepers', JSON.stringify(ghosts.slice(-10)));
+            } catch(e){}
+            gainXp(600);
+            addInvItem(s,'crown_of_the_sun_vault',1);
+            appendLog("Achievement: Keeper. You are now part of Crossroads. When new player uses same name, they get +5 vault start.");
+          }
+        },
+        { label:"Take crown off (back)", className:"secondary", next:"act3_endings" }
+      ];
+    }
+  };
+
+  // Inject siege omen & endings into crossroads when appropriate
+  if (STORY.crossroads && STORY.crossroads.choices) {
+    const origCross = STORY.crossroads.choices;
+    STORY.crossroads.choices = function(s){
+      let base = origCross(s);
+      const lvl = s.level||1;
+      const ws = ConsequenceEngine.worldState(s);
+      if (lvl>=45 && !getActFlag(ACT_FLAGS.act3_siege_omen)) {
+        base.unshift({ label:'[ACT3] Omen - Siege coming', next:'act3_omen', effect:function(){ setActFlag(ACT_FLAGS.act3_siege_omen,true); unlockLore('siege_horde'); } });
+      }
+      if ((lvl>=50 || ws.wildsSpread>40) && ws.sunVault<60) {
+        // show endings board early as teaser
+        base.unshift({ label:'[ACT3] Endings Board - Choose fate', next:'act3_endings' });
+      }
+      return base;
+    };
+  }
+}
+
+injectAct1();
+injectAct2();
+injectAct3();
+
+/* Patch normalize to trigger act checks */
+const _origNormAct = typeof normalizeState === 'function' ? normalizeState : null;
+function normalizeStateAct(s){
+  if (_origNormAct) _origNormAct(s);
+  if (!s) return;
+  // Act1 check: if investigation stage 2 but not yet cellar, remind
+  // Act2 check: vault approach already handled
+  // Act3: if level>=60 and not completed siege, ensure siege can trigger
+}
+try { normalizeState = normalizeStateAct; } catch(e){}
+if (typeof window !== 'undefined') window.normalizeState = normalizeStateAct;
+
+console.log('[VIRELIA STORY] 3-act storyline injected. Nodes: courier расширен, letter_open, mara_letter, korg_letter, cellar enhanced, ledger decision 4 paths, vault entrance/seal/stare, debt collector, hollow meet, omen, endings 4.');
+
+function storySanity(){
+  return {
+    actFlags: state && state.flags ? Object.keys(state.flags).filter(k=>k.indexOf('act')===0).length : 0,
+    conseq: state && state.flags && state.flags.consequenceLog && state.flags.consequenceLog.length || 0,
+    vaultShard: state && state.inventory && state.inventory.sun_vault_shard || 0,
+    hasDebt: state && state.inventory && state.inventory.debt_marker_guild || 0
+  };
+}
+if (typeof window !== 'undefined') window.storySanity = storySanity;
+/* VIRELIA - SETTINGS & THEME SYSTEM
+   Dual theme: text (bland mono) vs colorful (vibrant RPG)
+   Fixes Design button (now Settings) and Sanity Check (now Diagnostics)
+*/
+
+console.log('[VIRELIA SETTINGS] Loading...');
+
+const THEMES = {
+  text: { label: 'Text Mode (Mono)', desc: 'Original bland terminal, pure words, no colors. For purists.' },
+  colorful: { label: 'Colorful RPG (Vibrant)', desc: 'New design: gradients, glows, colorful badges, RPG feel.' },
+  parchment: { label: 'Parchment (Light)', desc: 'Old map scroll: sepia light, ink brown, readable day mode with paper texture.' }
+};
+
+function getSavedTheme() {
+  try {
+    const fromStorage = localStorage.getItem('virelia_theme');
+    if (fromStorage && THEMES[fromStorage]) return fromStorage;
+  } catch {}
+  if (state && state.flags && state.flags.theme && THEMES[state.flags.theme]) return state.flags.theme;
+  // Default to colorful for new players (user requested colorful, not bland)
+  return 'colorful';
+}
+
+function setTheme(theme, persist) {
+  theme = theme || 'colorful';
+  if (!THEMES[theme]) theme = 'colorful';
+  // Apply to body - support 3 themes
+  document.body.classList.remove('theme-text', 'theme-colorful', 'theme-parchment');
+  document.body.classList.add('theme-' + theme);
+  // Save
+  if (persist !== false) {
+    try { localStorage.setItem('virelia_theme', theme); } catch {}
+    if (state) {
+      state.flags = state.flags || {};
+      state.flags.theme = theme;
+      if (typeof autoSave === 'function') autoSave();
+    }
+  }
+  // Update any theme previews if settings modal open
+  const previews = document.querySelectorAll('[data-theme-preview]');
+  previews.forEach(el => {
+    el.style.borderColor = (el.dataset.themePreview === theme) ? '#7c5cff' : '';
+    el.style.boxShadow = (el.dataset.themePreview === theme) ? '0 0 0 2px rgba(124,92,255,0.35)' : '';
+  });
+  console.log('[THEME] Set to', theme);
+  // Log for lore
+  if (typeof appendLog === 'function' && state && state.log) {
+    // Don't spam log, only if called from settings
+  }
+}
+
+function initTheme() {
+  const theme = getSavedTheme();
+  setTheme(theme, false);
+}
+initTheme();
+
+// Settings Modal
+let settingsModalEl = null;
+let settingsModalBodyEl = null;
+
+function ensureSettingsModal() {
+  if (settingsModalEl) return;
+  settingsModalEl = document.createElement('div');
+  settingsModalEl.className = 'modalOverlay';
+  settingsModalEl.id = 'settingsModal';
+  settingsModalEl.style.display = 'none';
+
+  const card = document.createElement('div');
+  card.className = 'modalCard';
+  card.style.maxWidth = '720px';
+
+  const header = document.createElement('div');
+  header.className = 'modalHeader';
+  const title = document.createElement('div');
+  title.textContent = 'SETTINGS // THEME // DIAGNOSTICS';
+  title.style.fontWeight = '800';
+  const btnClose = document.createElement('button');
+  btnClose.textContent = '[ CLOSE ]';
+  btnClose.className = 'secondary';
+  btnClose.onclick = () => closeSettingsModal();
+  header.appendChild(title);
+  header.appendChild(btnClose);
+
+  const body = document.createElement('div');
+  body.className = 'modalBody';
+  body.id = 'settingsModalBody';
+
+  card.appendChild(header);
+  card.appendChild(body);
+  settingsModalEl.appendChild(card);
+  settingsModalEl.addEventListener('click', (e) => {
+    if (e.target === settingsModalEl) closeSettingsModal();
+  });
+  document.body.appendChild(settingsModalEl);
+  settingsModalBodyEl = body;
+}
+
+function openSettingsModal() {
+  ensureSettingsModal();
+  renderSettingsModal();
+  settingsModalEl.classList.add('open');
+  settingsModalEl.style.display = 'flex';
+}
+
+function closeSettingsModal() {
+  if (!settingsModalEl) return;
+  settingsModalEl.classList.remove('open');
+  settingsModalEl.style.display = 'none';
+}
+
+function renderSettingsModal() {
+  if (!settingsModalBodyEl) return;
+  settingsModalBodyEl.innerHTML = '';
+
+  const currentTheme = getSavedTheme();
+
+  // Intro
+  const intro = document.createElement('div');
+  intro.className = 'hint';
+  intro.style.whiteSpace = 'pre-wrap';
+  intro.textContent = 'Switch between 3 themes: Text Mode (bland mono), Colorful RPG (vibrant gradients), and Parchment (light old map). Your choice is saved.\n\nCurrent: ' + THEMES[currentTheme].label + ' — ' + THEMES[currentTheme].desc;
+  settingsModalBodyEl.appendChild(intro);
+
+  const grid = document.createElement('div');
+  grid.className = 'settingsGrid';
+
+  // Theme Card
+  const themeCard = document.createElement('div');
+  themeCard.className = 'settingsCard';
+  const themeTitle = document.createElement('div');
+  themeTitle.className = 'settingsCardTitle';
+  themeTitle.textContent = 'THEME';
+  themeCard.appendChild(themeTitle);
+
+  for (const key in THEMES) {
+    const def = THEMES[key];
+    const row = document.createElement('div');
+    row.className = 'settingsOption';
+    const left = document.createElement('div');
+    left.innerHTML = '<strong>' + def.label + '</strong><br><span class="hint" style="margin:0">' + def.desc + '</span>';
+    const right = document.createElement('button');
+    right.textContent = (currentTheme === key) ? '[ ACTIVE ]' : '[ USE ]';
+    right.className = (currentTheme === key) ? '' : 'secondary';
+    right.disabled = (currentTheme === key);
+    right.onclick = () => {
+      setTheme(key, true);
+      renderSettingsModal();
+      if (typeof render === 'function') render();
+    };
+    row.appendChild(left);
+    row.appendChild(right);
+    themeCard.appendChild(row);
+
+    const preview = document.createElement('div');
+    preview.className = 'themePreview ' + key;
+    preview.dataset.themePreview = key;
+    preview.textContent = def.label + ' preview';
+    if (currentTheme === key) {
+      preview.style.borderColor = '#7c5cff';
+      preview.style.boxShadow = '0 0 0 2px rgba(124,92,255,0.35)';
+    }
+    themeCard.appendChild(preview);
+  }
+  grid.appendChild(themeCard);
+
+  // Effects Card
+  const fxCard = document.createElement('div');
+  fxCard.className = 'settingsCard';
+  const fxTitle = document.createElement('div');
+  fxTitle.className = 'settingsCardTitle';
+  fxTitle.textContent = 'VISUAL EFFECTS';
+  fxCard.appendChild(fxTitle);
+
+  const fxList = [
+    { id: 'fx_hit', label: 'Hit Flash + Shake', key: 'fx-hit' },
+    { id: 'fx_status', label: 'Status Glows (Bleed/Rested/Cursed/Poison/Shield)', key: 'fx-status' }
+  ];
+  // Simplified toggle: we just show info, actual FX controlled via body classes - always on
+  const fxRow = document.createElement('div');
+  fxRow.className = 'settingsOption';
+  fxRow.innerHTML = '<div><strong>FX System</strong><br><span class="hint">Text-mode enhanced FX: red flash, shake, pulses, badges</span></div><div><span class="badge easy">ON</span></div>';
+  fxCard.appendChild(fxRow);
+
+  const fxRow2 = document.createElement('div');
+  fxRow2.className = 'settingsOption';
+  fxRow2.innerHTML = '<div><strong>Build Badge</strong><br><span class="hint">Bottom-left build version</span></div><div><span class="badge normal">VISIBLE</span></div>';
+  fxCard.appendChild(fxRow2);
+
+  grid.appendChild(fxCard);
+
+  // Gameplay Card
+  const gameCard = document.createElement('div');
+  gameCard.className = 'settingsCard';
+  gameCard.innerHTML = '<div class="settingsCardTitle">GAMEPLAY</div>';
+  const rows = [
+    { label: 'World State Decay', desc: 'Vault -1/day if <80, plague spread', value: 'ON' },
+    { label: 'Consequence Board', desc: 'City remembers actions', value: 'ON' },
+    { label: 'Free Roam Costs', desc: 'Rations/water/torch costs', value: 'ON' },
+    { label: 'Combat Twists', desc: 'Surrender, reinforcements, darkness', value: '18% per round' }
+  ];
+  rows.forEach(r => {
+    const row = document.createElement('div');
+    row.className = 'settingsOption';
+    row.innerHTML = '<div><strong>' + r.label + '</strong><br><span class="hint">' + r.desc + '</span></div><div><span class="badge">' + r.value + '</span></div>';
+    gameCard.appendChild(row);
+  });
+  grid.appendChild(gameCard);
+
+  // Diagnostics Card
+  const diagCard = document.createElement('div');
+  diagCard.className = 'settingsCard';
+  diagCard.innerHTML = '<div class="settingsCardTitle">DIAGNOSTICS</div><div class="hint" style="margin-bottom:8px">Formerly Sanity Check button. Now shows full diagnostics.</div>';
+  const diagBtn = document.createElement('button');
+  diagBtn.textContent = '[ RUN DIAGNOSTICS ]';
+  diagBtn.onclick = () => runFullDiagnostics();
+  diagCard.appendChild(diagBtn);
+  const diagResult = document.createElement('div');
+  diagResult.id = 'settingsDiagnosticsResult';
+  diagResult.className = 'hint';
+  diagResult.style.whiteSpace = 'pre-wrap';
+  diagResult.style.marginTop = '10px';
+  diagResult.textContent = 'Click to run...';
+  diagCard.appendChild(diagResult);
+  grid.appendChild(diagCard);
+
+  settingsModalBodyEl.appendChild(grid);
+
+  // Footer with reset
+  const footer = document.createElement('div');
+  footer.className = 'row';
+  footer.style.marginTop = '14px';
+  footer.style.justifyContent = 'space-between';
+  const btnReset = document.createElement('button');
+  btnReset.textContent = '[ RESET SETTINGS ]';
+  btnReset.className = 'danger';
+  btnReset.onclick = () => {
+    try { localStorage.removeItem('virelia_theme'); } catch {}
+    if (state) {
+      state.flags = state.flags || {};
+      delete state.flags.theme;
+    }
+    setTheme('colorful', true);
+    renderSettingsModal();
+  };
+  const btnClose = document.createElement('button');
+  btnClose.textContent = '[ CLOSE ]';
+  btnClose.className = 'secondary';
+  btnClose.onclick = () => closeSettingsModal();
+  footer.appendChild(btnReset);
+  footer.appendChild(btnClose);
+  settingsModalBodyEl.appendChild(footer);
+}
+
+function runFullDiagnostics() {
+  const resultEl = document.getElementById('settingsDiagnosticsResult');
+  if (!resultEl) return;
+  let out = '';
+  try {
+    if (typeof window.vireliaSanityCheck === 'function') {
+      const r = window.vireliaSanityCheck();
+      out += '--- vireliaSanityCheck ---\n' + JSON.stringify(r, null, 2) + '\n\n';
+    } else {
+      out += 'vireliaSanityCheck: NOT FOUND\n\n';
+    }
+  } catch(e) { out += 'vireliaSanityCheck ERROR: ' + e + '\n\n'; }
+  try {
+    if (typeof window.v2Sanity === 'function') {
+      const r = window.v2Sanity();
+      out += '--- v2Sanity (consequence, mix, free roam) ---\n' + JSON.stringify(r, null, 2) + '\n\n';
+    }
+  } catch(e) { out += 'v2Sanity ERROR: ' + e + '\n\n'; }
+  try {
+    if (typeof window.loreSanity === 'function') {
+      const r = window.loreSanity();
+      out += '--- loreSanity (codex) ---\n' + JSON.stringify(r, null, 2) + '\n\n';
+    }
+  } catch(e) { out += 'loreSanity ERROR: ' + e + '\n\n'; }
+  try {
+    if (typeof window.storySanity === 'function') {
+      const r = window.storySanity();
+      out += '--- storySanity (acts) ---\n' + JSON.stringify(r, null, 2) + '\n\n';
+    }
+  } catch(e) { out += 'storySanity ERROR: ' + e + '\n\n'; }
+
+  out += '--- Theme ---\nCurrent: ' + getSavedTheme() + '\n';
+  out += 'Body classes: ' + document.body.className + '\n';
+  out += 'State flags theme: ' + (state && state.flags && state.flags.theme || 'none') + '\n';
+  out += 'LocalStorage theme: ';
+  try { out += localStorage.getItem('virelia_theme') || 'none'; } catch { out += 'blocked'; }
+  out += '\n\n--- Game State ---\n';
+  if (state) {
+    out += 'Profile: ' + state.profile + '\nLevel: ' + state.level + ' Node: ' + state.nodeId + '\nHP: ' + state.hp + '/' + (typeof playerMaxHp === 'function' ? playerMaxHp() : state.maxHp) + '\nEffects: ' + (state.effects ? Object.keys(state.effects).join(',') : 'none') + '\n';
+  } else {
+    out += 'No active state (home screen)\n';
+  }
+
+  resultEl.textContent = out;
+  // Also set home msg if exists
+  if (typeof setHomeMsg === 'function') {
+    setHomeMsg('Diagnostics ran. See Settings modal for details. Check console for full object.');
+  }
+  console.log('[DIAGNOSTICS]\n' + out);
+}
+
+// Fix btnDesign (now Settings) and ensure it opens settings
+function fixDesignButton() {
+  const btn = document.getElementById('btnDesign');
+  if (!btn) return;
+  // Rename
+  btn.textContent = '[ SETTINGS ]';
+  btn.title = 'Open settings: switch Text vs Colorful vs Parchment themes, diagnostics';
+  // Remove old listeners by cloning
+  const newBtn = btn.cloneNode(true);
+  btn.parentNode.replaceChild(newBtn, btn);
+  newBtn.addEventListener('click', () => {
+    if (typeof worldTick === 'function') worldTick('Settings');
+    openSettingsModal();
+  });
+  // Ensure enabled even in drafts? Keep disabled logic from syncSidebarButtons? We'll keep but always allow settings
+  // Override sync to not disable settings
+  const origSync = typeof syncSidebarButtons === 'function' ? syncSidebarButtons : null;
+  if (origSync) {
+    const original = syncSidebarButtons;
+    // Monkey patch to keep settings enabled
+    window.syncSidebarButtons = function() {
+      original();
+      const b = document.getElementById('btnDesign');
+      if (b) b.disabled = false;
+      const lb = document.getElementById('btnLogout');
+      if (lb) lb.disabled = false;
+    };
+    try { syncSidebarButtons = window.syncSidebarButtons; } catch {}
+  }
+}
+
+function logoutNormalUser() {
+  // Similar to admin logout but for normal users
+  try {
+    if (typeof worldTick === 'function') worldTick('Logout');
+  } catch {}
+  // Save current if exists?
+  if (state && typeof autoSave === 'function') {
+    try { autoSave(); } catch {}
+  }
+  // Clear state
+  state = null;
+  // Clear UI panels
+  try {
+    if (typeof outputEl !== 'undefined' && outputEl) outputEl.innerHTML = '';
+    if (typeof choicesEl !== 'undefined' && choicesEl) choicesEl.innerHTML = '';
+    if (typeof statsEl !== 'undefined' && statsEl) statsEl.innerHTML = '';
+    if (typeof questListEl !== 'undefined' && questListEl) questListEl.innerHTML = '';
+    if (typeof renderEffectsUi === 'function') renderEffectsUi();
+  } catch {}
+  // Reset admin flags
+  if (typeof adminMode !== 'undefined') adminMode = false;
+  if (typeof adminEditingProfile !== 'undefined') adminEditingProfile = null;
+  if (typeof adminShowGame !== 'undefined') adminShowGame = true;
+  const adminPassEl = document.getElementById('adminPass');
+  if (adminPassEl) adminPassEl.value = '';
+  if (typeof setAdminDashboardUi === 'function') setAdminDashboardUi();
+  if (typeof renderHomeSaves === 'function') renderHomeSaves();
+  if (typeof setHomeMsg === 'function') setHomeMsg('Logged out. Enter profile name to Continue or Start New.');
+  // Scroll to top/home
+  const homeEl = document.getElementById('home');
+  if (homeEl) homeEl.scrollIntoView({ behavior: 'smooth' });
+  const profileNameEl = document.getElementById('profileName');
+  if (profileNameEl) profileNameEl.focus();
+}
+
+function fixLogoutButton() {
+  const btn = document.getElementById('btnLogout');
+  if (!btn) return;
+  btn.textContent = '[ LOGOUT ]';
+  btn.title = 'Logout current profile, save, return to home screen';
+  btn.style.display = 'inline-block';
+  btn.disabled = false;
+  // Remove old and add new with fresh listener, also keep backup via onclick
+  const newBtn = btn.cloneNode(true);
+  btn.parentNode.replaceChild(newBtn, btn);
+  const finalBtn = document.getElementById('btnLogout');
+  if (finalBtn) {
+    finalBtn.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      console.log('[LOGOUT] Button clicked');
+      logoutNormalUser();
+    };
+    finalBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      logoutNormalUser();
+    });
+  }
+}
+
+// Global delegated handler for logout (backup)
+document.addEventListener('click', function(e){
+  const target = e.target;
+  if (!target) return;
+  if (target.id === 'btnLogout' || (target.closest && target.closest('#btnLogout'))) {
+    console.log('[LOGOUT] Delegated click');
+    e.preventDefault();
+    e.stopPropagation();
+    if (typeof logoutNormalUser === 'function') logoutNormalUser();
+  }
+});
+
+// Also fix admin sanity button - enhance its behavior
+function fixSanityButton() {
+  // The sanity button is created dynamically in renderAdminTools, so we patch renderAdminTools
+  const origRenderAdminTools = typeof renderAdminTools === 'function' ? renderAdminTools : null;
+  if (!origRenderAdminTools) return;
+
+  window.renderAdminTools = function() {
+    origRenderAdminTools();
+    // Find the sanity button by text
+    const adminToolsEl = document.getElementById('adminTools');
+    if (!adminToolsEl) return;
+    const buttons = adminToolsEl.querySelectorAll('button');
+    for (let i=0; i<buttons.length; i++) {
+      const b = buttons[i];
+      if (b.textContent && b.textContent.toLowerCase().indexOf('sanity check') >=0) {
+        b.textContent = '[ RUN DIAGNOSTICS ]';
+        b.title = 'Shows full diagnostics: sanity + v2 + lore + story + theme';
+        // Replace click handler
+        const newB = b.cloneNode(true);
+        b.parentNode.replaceChild(newB, b);
+        newB.addEventListener('click', () => {
+          runFullDiagnostics();
+          openSettingsModal();
+          // Also scroll diagnostics card into view
+          setTimeout(() => {
+            const resultEl = document.getElementById('settingsDiagnosticsResult');
+            if (resultEl) resultEl.scrollIntoView({ behavior: 'smooth' });
+          }, 200);
+        });
+        break;
+      }
+    }
+  };
+  try { renderAdminTools = window.renderAdminTools; } catch {}
+}
+
+// Initialize on load
+function initSettings() {
+  // Apply theme ASAP
+  initTheme();
+  // Fix buttons after DOM ready
+  setTimeout(() => {
+    fixDesignButton();
+    fixSanityButton();
+    fixLogoutButton();
+  }, 500);
+  // Also re-fix after home saves render (which recreates admin tools)
+  const origRenderHomeSaves = typeof renderHomeSaves === 'function' ? renderHomeSaves : null;
+  if (origRenderHomeSaves) {
+    window.renderHomeSaves = function() {
+      origRenderHomeSaves();
+      fixDesignButton();
+      fixSanityButton();
+      fixLogoutButton();
+    };
+    try { renderHomeSaves = window.renderHomeSaves; } catch {}
+  }
+}
+
+// Run
+initSettings();
+
+// Expose
+if (typeof window !== 'undefined') {
+  window.setTheme = setTheme;
+  window.getSavedTheme = getSavedTheme;
+  window.openSettingsModal = openSettingsModal;
+  window.closeSettingsModal = closeSettingsModal;
+  window.runFullDiagnostics = runFullDiagnostics;
+}
+
+console.log('[VIRELIA SETTINGS] Ready. Themes: text, colorful. Design button now Settings.');

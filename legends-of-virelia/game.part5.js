@@ -1225,7 +1225,8 @@ let marketRankSelectEl = null;
 function getQuestBoardElements() {
   return {
     title: document.getElementById('questBoardTitle'),
-    tabs: document.getElementById('questBoardTabs')
+    tabs: document.getElementById('questBoardTabs'),
+    panel: document.getElementById('questsPanel')
   };
 }
 
@@ -1233,12 +1234,31 @@ function updateQuestBoardTitle() {
   const els = getQuestBoardElements();
   const isMarket = !!(state && (state.nodeId || "") === "market");
   if (els.title) {
+    // SHOP BOARD feature: switch name when in market node
     els.title.textContent = isMarket ? "-- SHOP BOARD --" : "-- QUEST BOARD --";
+    // Add visual distinction
+    if (isMarket) {
+      els.title.setAttribute('data-mode', 'shop');
+      els.title.title = 'Shop Board - Rank filter + search active. Use item ranking to find gear.';
+    } else {
+      els.title.setAttribute('data-mode', 'quest');
+      els.title.title = 'Quest Board - filter by difficulty';
+    }
   }
   if (els.tabs) {
     els.tabs.style.display = isMarket ? "none" : "flex";
   }
+  if (els.panel) {
+    if (isMarket) {
+      els.panel.classList.add('shop-mode');
+      els.panel.classList.remove('quest-mode');
+    } else {
+      els.panel.classList.add('quest-mode');
+      els.panel.classList.remove('shop-mode');
+    }
+  }
 }
+
 
 function renderQuestList() {
   if (!state) {
@@ -1330,6 +1350,8 @@ function renderQuestList() {
   if (btnPrevQuest) btnPrevQuest.disabled = questPage <= 0;
   if (btnNextQuest) btnNextQuest.disabled = questPage >= maxPage;
 
+  const isRested = !!(state && typeof hasEffectOnState === 'function' && hasEffectOnState(state, "rested"));
+
   for (const q of toShow) {
     const item = document.createElement("div");
     item.className = "questItem";
@@ -1368,7 +1390,18 @@ function renderQuestList() {
     const btn = document.createElement("button");
     btn.textContent = done ? (isAdminProfile(state.profile) ? "Replay" : "Done") : (gate.ok ? "Accept" : "Locked");
     if (!gate.ok || (done && !isAdminProfile(state.profile))) btn.disabled = true;
-    btn.addEventListener("click", () => startQuest(q));
+    else if (isRested) {
+      btn.disabled = true;
+      btn.title = "Resting... wait until rested ends";
+    }
+    btn.addEventListener("click", () => {
+      if (isRested) {
+        appendLog("You are resting. All actions paused until rested ends.");
+        render();
+        return;
+      }
+      startQuest(q);
+    });
     row.appendChild(btn);
 
     if (!gate.ok && !(done && !isAdminProfile(state.profile))) {
@@ -1380,6 +1413,19 @@ function renderQuestList() {
 
     item.appendChild(row);
     questListEl.appendChild(item);
+  }
+  if (isRested) {
+    const hint = document.createElement("div");
+    hint.className = "hint";
+    hint.style.color = "#2ad37b";
+    hint.style.fontWeight = "700";
+    hint.style.marginTop = "8px";
+    try {
+      const eff = state.effects && state.effects.rested;
+      const sec = eff && typeof eff.expiresAt === 'number' ? Math.max(0, Math.ceil((eff.expiresAt - Date.now())/1000)) : 0;
+      hint.textContent = "💤 Resting... Quest Accept paused for " + sec + "s.";
+    } catch { hint.textContent = "💤 Resting..."; }
+    questListEl.appendChild(hint);
   }
 }
 
@@ -1402,16 +1448,25 @@ function ensureMarketSearchUi() {
   questListEl.innerHTML = "";
 
   marketSearchWrapEl = document.createElement("div");
+  marketSearchWrapEl.id = "marketSearchWrap";
   marketSearchWrapEl.style.display = "flex";
   marketSearchWrapEl.style.flexDirection = "column";
   marketSearchWrapEl.style.gap = "10px";
 
+  const headerHint = document.createElement("div");
+  headerHint.className = "hint";
+  headerHint.style.marginTop = "0";
+  headerHint.style.fontWeight = "600";
+  headerHint.textContent = "🛒 Shop Board — Search items + filter by Ranking (Common→Legendary→Curio). Title switches from Quest Board to Shop Board when in Market node.";
+  marketSearchWrapEl.appendChild(headerHint);
+
   const row = document.createElement("div");
   row.className = "row";
   row.style.alignItems = "center";
+  row.style.flexWrap = "wrap";
 
   marketSearchInputEl = document.createElement("input");
-  marketSearchInputEl.placeholder = "Search items...";
+  marketSearchInputEl.placeholder = "Search Shop... (name or key)";
   marketSearchInputEl.value = String(marketSearchQuery || "");
   marketSearchInputEl.autocomplete = "off";
   marketSearchInputEl.spellcheck = false;
@@ -1426,13 +1481,15 @@ function ensureMarketSearchUi() {
     }, 90);
   });
 
-  // Rank filter for shop
+  // Rank filter for shop - ensures shop board feature has rank filter
   const rankLabel = document.createElement("div");
   rankLabel.className = "hint";
   rankLabel.textContent = "Rank";
   rankLabel.style.marginLeft = "8px";
+  rankLabel.title = "Filter shop items by item ranking";
 
   marketRankSelectEl = document.createElement("select");
+  marketRankSelectEl.title = "Filter by item Rank: Common, Uncommon, Rare, Epic, Legendary, Curio";
   const rankOpts = [
     { v: "all", t: "All Ranks" },
     { v: "common", t: "Common" },
@@ -1449,7 +1506,7 @@ function ensureMarketSearchUi() {
     marketRankSelectEl.appendChild(opt);
   }
   marketRankSelectEl.value = String(marketRankFilter || "all");
-  marketRankSelectEl.style.minWidth = "120px";
+  marketRankSelectEl.style.minWidth = "132px";
   marketRankSelectEl.addEventListener("change", () => {
     marketRankFilter = String(marketRankSelectEl.value || "all");
     marketPage = 0;
@@ -1462,6 +1519,7 @@ function ensureMarketSearchUi() {
   marketSearchWrapEl.appendChild(row);
 
   marketSearchResultsEl = document.createElement("div");
+  marketSearchResultsEl.id = "marketSearchResults";
   marketSearchResultsEl.style.display = "flex";
   marketSearchResultsEl.style.flexDirection = "column";
   marketSearchResultsEl.style.gap = "10px";
@@ -1474,7 +1532,7 @@ function renderMarketList() {
   if (!state) return;
   normalizeState(state);
 
-  // Ensure board title is Shop Board when in market
+  // Ensure board title is Shop Board when in market - core shop board feature
   if (typeof updateQuestBoardTitle === 'function') updateQuestBoardTitle();
 
   ensureMarketSearchUi();
@@ -1484,7 +1542,7 @@ function renderMarketList() {
 
   const allKeys = marketStockKeys();
 
-  // Filter by rank first
+  // Filter by rank first - shop rank filter feature
   const rf = String(marketRankFilter || "all").toLowerCase();
   let rankFiltered = allKeys;
   if (rf && rf !== "all") {
@@ -1515,11 +1573,25 @@ function renderMarketList() {
     const start = marketPage * MARKET_ITEMS_PER_PAGE;
     const end = Math.min(total, start + MARKET_ITEMS_PER_PAGE);
     questPageInfo.textContent = total === 0
-      ? "Market: no items"
-      : `Market: ${start + 1}-${end} of ${total}`;
+      ? "Shop: no items (check rank filter)"
+      : `Shop: ${start + 1}-${end} of ${total} [${rf === 'all' ? 'All Ranks' : rf}]`;
   }
   if (btnPrevQuest) btnPrevQuest.disabled = marketPage <= 0;
   if (btnNextQuest) btnNextQuest.disabled = marketPage >= maxPage;
+
+  const isRested = !!(state && typeof hasEffectOnState === 'function' && hasEffectOnState(state, "rested"));
+  if (isRested) {
+    const restHint = document.createElement("div");
+    restHint.className = "hint";
+    restHint.style.color = "#2ad37b";
+    restHint.style.fontWeight = "700";
+    try {
+      const eff = state.effects && state.effects.rested;
+      const sec = eff && typeof eff.expiresAt === 'number' ? Math.max(0, Math.ceil((eff.expiresAt - Date.now())/1000)) : 0;
+      restHint.textContent = "💤 Resting... Shop purchases paused for " + sec + "s. Wait to buy.";
+    } catch { restHint.textContent = "💤 Resting... Shop paused."; }
+    marketSearchResultsEl.appendChild(restHint);
+  }
 
   for (const k of keys.slice(marketPage * MARKET_ITEMS_PER_PAGE, marketPage * MARKET_ITEMS_PER_PAGE + MARKET_ITEMS_PER_PAGE)) {
     const def = itemDef(k);
@@ -1528,8 +1600,11 @@ function renderMarketList() {
     const owned = Math.max(0, Math.floor(state.inventory?.[k] || 0));
 
     const item = document.createElement("div");
-    item.className = "questItem";
-    item.style.cursor = "pointer";
+    item.className = "questItem shopItem";
+    item.dataset.rank = r.rank;
+    item.dataset.key = k;
+    item.style.cursor = isRested ? "not-allowed" : "pointer";
+    if (isRested) item.style.opacity = "0.55";
 
     const top = document.createElement("div");
     top.className = "questTop";
@@ -1547,20 +1622,36 @@ function renderMarketList() {
 
     const meta = document.createElement("div");
     meta.className = "questMeta";
-    meta.textContent = `Price: ${price} gold | Owned: ${owned}`;
+    meta.textContent = `Price: ${price} gold | Owned: ${owned} | Rank: ${r.rank}`;
     item.appendChild(meta);
 
     if (!isAdminProfile(state.profile) && (state.gold || 0) < price) {
-      item.style.opacity = "0.6";
+      item.style.opacity = isRested ? "0.45" : "0.6";
     }
 
     item.addEventListener("click", () => {
+      if (isRested) {
+        appendLog("You are resting. Shop purchases paused until rested ends.");
+        render();
+        return;
+      }
       openMarketItemModal(k);
     });
 
     marketSearchResultsEl.appendChild(item);
   }
+  // If no items after filter, show help
+  if (marketSearchResultsEl.children.length === 0 || (marketSearchResultsEl.children.length === 1 && isRested)) {
+    if (!isRested || marketSearchResultsEl.children.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "hint";
+      empty.textContent = rf === 'all' && !q ? "No items found." : `No items match: search='${q||''}' rank='${rf}'. Try All Ranks or clear search.`;
+      empty.style.marginTop = "8px";
+      marketSearchResultsEl.appendChild(empty);
+    }
+  }
 }
+
 
 function setTabUi() {
   if (activeTab === "missions") {

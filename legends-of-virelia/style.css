@@ -601,3 +601,69 @@ body.theme-colorful .themePreview { border-radius: 8px; }
 .themePreview.text { background: #111; color: #888; }
 .themePreview.colorful { background: linear-gradient(135deg, #1a1030, #2dd4bf22, #7c5cff22); color: #a78bfa; border-color: rgba(124,92,255,0.3); }
 .themePreview.parchment { background: #f5f1e8; color: #5a4a3a; border-color: #c2b8a3; }
+
+/* ===== SHOP BOARD FEATURE - distinctive styling ===== */
+#questsPanel.shop-mode {
+  border-color: #c9a86a !important;
+  box-shadow: 0 0 0 1px rgba(201,168,106,0.15);
+}
+#questsPanel.shop-mode .section-title[data-mode="shop"] {
+  color: #c9a86a;
+  border-bottom-color: #c9a86a;
+  text-shadow: 0 0 8px rgba(201,168,106,0.25);
+}
+#questsPanel.shop-mode .section-title[data-mode="shop"]::before {
+  content: "🛒 ";
+}
+body.theme-colorful #questsPanel.shop-mode {
+  border-color: rgba(201,168,106,0.35) !important;
+  box-shadow: 0 8px 22px rgba(201,168,106,0.12), 0 0 0 1px rgba(201,168,106,0.18) inset;
+}
+body.theme-colorful #questsPanel.shop-mode .section-title[data-mode="shop"] {
+  color: #ffd580;
+  border-bottom-color: rgba(201,168,106,0.45);
+  background: linear-gradient(90deg, rgba(201,168,106,0.18), transparent);
+  padding-bottom: 6px;
+}
+body.theme-parchment #questsPanel.shop-mode {
+  border-color: #8b7355 !important;
+  background: #fffaf0;
+  box-shadow: 0 4px 14px rgba(139,115,85,0.15);
+}
+body.theme-parchment #questsPanel.shop-mode .section-title[data-mode="shop"] {
+  color: #5a3a1a;
+  border-bottom: 2px solid #c9a86a;
+}
+#marketSearchWrap {
+  background: rgba(0,0,0,0.06);
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px dashed rgba(201,168,106,0.25);
+}
+body.theme-colorful #marketSearchWrap {
+  background: rgba(14,21,32,0.5);
+  border: 1px dashed rgba(201,168,106,0.25);
+  border-radius: 12px;
+  padding: 10px;
+}
+body.theme-parchment #marketSearchWrap {
+  background: #f5f1e8;
+  border: 1px dashed #c2b8a3;
+}
+.questItem.shopItem {
+  border-left: 3px solid rgba(201,168,106,0.55);
+}
+.questItem.shopItem:hover {
+  border-left-color: #c9a86a;
+  border-color: rgba(201,168,106,0.45);
+}
+body.theme-colorful .questItem.shopItem {
+  border-left: 3px solid rgba(201,168,106,0.6);
+}
+body.theme-colorful .questItem.shopItem:hover {
+  border-left-color: #ffd580;
+}
+body.theme-text #questsPanel.shop-mode .section-title {
+  border-bottom-style: solid;
+  border-bottom-color: #c9a86a;
+}
