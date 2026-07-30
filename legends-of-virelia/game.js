@@ -4349,10 +4349,21 @@ function renderAdminTools() {
       loaded.flags.allegiance = selA;
     }
 
+    // Merge staged effect changes for this profile if any (effects only apply on Save)
+    try {
+      if (typeof window.adminStagedEffectSaves !== 'undefined' && window.adminStagedEffectSaves[adminEditingProfile]) {
+        const staged = window.adminStagedEffectSaves[adminEditingProfile];
+        if (staged && staged.effects) {
+          loaded.effects = staged.effects;
+        }
+        delete window.adminStagedEffectSaves[adminEditingProfile];
+      }
+    } catch(e) { console.warn('merge staged effects failed', e); }
+
     loaded.updatedAt = nowIso();
     safeSave(adminEditingProfile, loaded);
     renderHomeSaves();
-    setHomeMsg(`Saved changes for ${adminEditingProfile}.`);
+    setHomeMsg(`Saved changes for ${adminEditingProfile}. Effects will apply when player next joins.`);
   });
 
   const btnDeleteUser = document.createElement("button");
@@ -4393,7 +4404,41 @@ function renderAdminTools() {
   container.appendChild(skillWrap);
   adminToolsEl.appendChild(container);
 
-  // === ADMIN APPLY EFFECT TO OTHERS ===
+// === ADMIN APPLY EFFECT TO OTHERS - STAGED, ONLY ON SAVE ===
+  // Staging map for effects that will only be saved when admin clicks Save
+  if (typeof window.adminStagedEffectSaves === 'undefined') window.adminStagedEffectSaves = {};
+  const adminStagedEffectSaves = window.adminStagedEffectSaves;
+
+  function stageEffectChange(targetProfile, modifyFn, message) {
+    const prof = String(targetProfile||"").trim();
+    if (!prof) return;
+    // Load current staged or from storage
+    let staged = adminStagedEffectSaves[prof];
+    if (!staged) {
+      const base = safeLoad(prof);
+      if (!base) {
+        setHomeMsg(`No save for ${prof}`);
+        return;
+      }
+      // clone
+      staged = JSON.parse(JSON.stringify(base));
+    }
+    staged.effects = staged.effects || {};
+    modifyFn(staged);
+    staged.updatedAt = (typeof nowIso === 'function' ? nowIso() : new Date().toISOString());
+    adminStagedEffectSaves[prof] = staged;
+
+    // If currently editing this profile, also update loaded variable in place
+    try {
+      if (typeof loaded !== 'undefined' && loaded && adminEditingProfile === prof) {
+        loaded.effects = JSON.parse(JSON.stringify(staged.effects));
+      }
+    } catch {}
+
+    setHomeMsg(message + ` Staged for ${prof}. Click Save Changes or Save Staged Effects to apply. It will take effect when player next joins.`);
+    renderAdminTools();
+  }
+
   const effectWrap = document.createElement("div");
   effectWrap.style.display = "flex";
   effectWrap.style.flexDirection = "column";
@@ -4407,13 +4452,13 @@ function renderAdminTools() {
   effectTitle.className = "hint";
   effectTitle.style.marginTop = "0";
   effectTitle.style.fontWeight = "700";
-  effectTitle.textContent = "Admin: Apply Effect to Others (effects persist through logout and timer resumes)";
+  effectTitle.textContent = "Admin: Stage Effect for Others (only applied on Save, active when player next joins)";
   effectWrap.appendChild(effectTitle);
 
   const effectDesc = document.createElement("div");
   effectDesc.className = "hint";
   effectDesc.style.marginTop = "0";
-  effectDesc.textContent = "Select a user profile, choose an effect, set duration (seconds). Applied effects are saved and will pause on logout and resume with remaining time on next login.";
+  effectDesc.textContent = "Select a user, choose effect, duration. Clicking Apply only stages the change. It is saved and takes effect only when you click Save Changes (for edited user) or Save Staged Effects. Player will get it on next join/login, timer will pause until they join.";
   effectWrap.appendChild(effectDesc);
 
   const profiles = (typeof listSaveProfiles === 'function') ? listSaveProfiles() : [];
@@ -4423,7 +4468,7 @@ function renderAdminTools() {
   for (const prof of profiles) {
     const opt = document.createElement("option");
     opt.value = prof;
-    opt.textContent = prof;
+    opt.textContent = prof + (adminStagedEffectSaves[prof] ? " *staged*" : "");
     if (prof === adminEditingProfile) opt.selected = true;
     profileSel.appendChild(opt);
   }
@@ -4436,10 +4481,8 @@ function renderAdminTools() {
 
   const effectKeys = [
     "bleeding","poisoned","cursed","rested","shielded","aether","hasted","well_fed","hydrated","torchlight",
-    "titanblood","sunfire","voidsalt","wyrmhide","ironbark","smokeveil","shadowstep","mindglass","stormseed",
-    "aether","sunfire","titanblood","wyrmhide","ironbark","voidsalt","sunfire","shadowstep","smokeveil","hasted","well_fed"
+    "titanblood","sunfire","voidsalt","wyrmhide","ironbark","smokeveil","shadowstep","mindglass","stormseed"
   ];
-  // dedupe
   const uniqueEffectKeys = [...new Set(effectKeys)].sort();
   const effectSel = document.createElement("select");
   effectSel.id = "adminEffectKeySel";
@@ -4453,7 +4496,7 @@ function renderAdminTools() {
 
   const effectDurInput = document.createElement("input");
   effectDurInput.id = "adminEffectDur";
-  effectDurInput.placeholder = "Duration seconds";
+  effectDurInput.placeholder = "Duration sec";
   effectDurInput.value = "15";
   effectDurInput.style.width = "90px";
   effectDurInput.type = "number";
@@ -4472,142 +4515,140 @@ function renderAdminTools() {
   effectBtnRow.className = "row";
 
   const btnApplyEffect = document.createElement("button");
-  btnApplyEffect.textContent = "Apply Effect to User";
+  btnApplyEffect.textContent = "Stage Effect for User";
+  btnApplyEffect.title = "Stage effect - will only be saved when you click Save";
   btnApplyEffect.addEventListener("click", () => {
     const targetProfile = String(profileSel.value || "").trim();
     const effKey = String(effectSel.value || "").trim();
     const durSec = parseFloat(effectDurInput.value || "15");
     const durMs = Math.max(1000, Math.floor((isFinite(durSec) ? durSec : 15) * 1000));
-    if (!targetProfile) { setHomeMsg("Select a target profile"); return; }
-    if (!effKey) { setHomeMsg("Select an effect"); return; }
-    const loadedEff = safeLoad(targetProfile);
-    if (!loadedEff) { setHomeMsg(`No save found for ${targetProfile}`); return; }
-    if (typeof normalizeState === 'function') normalizeState(loadedEff);
-    loadedEff.effects = loadedEff.effects || {};
-    // If target is currently loaded as state, use addEffect else manually set
-    if (state && state.profile === targetProfile) {
-      if (typeof addEffect === 'function') {
-        const prevState = state;
-        // Temporarily set state to loaded? Actually state already is loadedEff if same profile, so use addEffect
-        addEffect(effKey, durMs);
-        loadedEff.effects = state.effects;
-      } else {
-        loadedEff.effects[effKey] = { key: effKey, expiresAt: (typeof nowMs === 'function' ? nowMs() : Date.now()) + durMs };
-      }
-    } else {
-      loadedEff.effects[effKey] = { key: effKey, expiresAt: (typeof nowMs === 'function' ? nowMs() : Date.now()) + durMs };
-      // add tick timers if needed
-      if (effKey === 'bleeding') loadedEff.effects[effKey].nextTickAt = (typeof nowMs === 'function' ? nowMs() : Date.now()) + 5000;
-      if (effKey === 'aether') loadedEff.effects[effKey].nextTickAt = (typeof nowMs === 'function' ? nowMs() : Date.now()) + 4000;
-      if (effKey === 'poisoned') loadedEff.effects[effKey].nextTickAt = (typeof nowMs === 'function' ? nowMs() : Date.now()) + 4000;
-    }
-    loadedEff.updatedAt = (typeof nowIso === 'function' ? nowIso() : new Date().toISOString());
-    const ok = safeSave(targetProfile, loadedEff);
-    if (ok) {
-      setHomeMsg(`Applied ${effKey} (${durSec}s) to ${targetProfile}. Effect will persist through logout and resume.`);
-      // If currently editing that profile, refresh UI
-      if (state && state.profile === targetProfile && typeof renderEffectsUi === 'function') renderEffectsUi();
-      renderHomeSaves();
-      renderAdminTools();
-    } else {
-      setHomeMsg(`Failed to apply effect to ${targetProfile}`);
-    }
+    if (!targetProfile) { setHomeMsg("Select target"); return; }
+    if (!effKey) { setHomeMsg("Select effect"); return; }
+    stageEffectChange(targetProfile, (staged) => {
+      staged.effects[effKey] = { key: effKey, expiresAt: (typeof nowMs === 'function' ? nowMs() : Date.now()) + durMs };
+      if (effKey === 'bleeding') staged.effects[effKey].nextTickAt = (typeof nowMs === 'function' ? nowMs() : Date.now()) + 5000;
+      if (effKey === 'aether') staged.effects[effKey].nextTickAt = (typeof nowMs === 'function' ? nowMs() : Date.now()) + 4000;
+      if (effKey === 'poisoned') staged.effects[effKey].nextTickAt = (typeof nowMs === 'function' ? nowMs() : Date.now()) + 4000;
+    }, `Staged ${effKey} (${durSec}s) for ${targetProfile}.`);
   });
 
   const btnRemoveEffect = document.createElement("button");
   btnRemoveEffect.className = "secondary";
-  btnRemoveEffect.textContent = "Remove Effect from User";
+  btnRemoveEffect.textContent = "Stage Remove Effect";
   btnRemoveEffect.addEventListener("click", () => {
     const targetProfile = String(profileSel.value || "").trim();
     const effKey = String(effectSel.value || "").trim();
-    if (!targetProfile) { setHomeMsg("Select target"); return; }
-    const loadedEff = safeLoad(targetProfile);
-    if (!loadedEff) { setHomeMsg("No save"); return; }
-    if (loadedEff.effects && loadedEff.effects[effKey]) {
-      delete loadedEff.effects[effKey];
-      loadedEff.updatedAt = (typeof nowIso === 'function' ? nowIso() : new Date().toISOString());
-      safeSave(targetProfile, loadedEff);
-      if (state && state.profile === targetProfile) {
-        if (state.effects && state.effects[effKey]) delete state.effects[effKey];
-        if (typeof renderEffectsUi === 'function') renderEffectsUi();
-      }
-      setHomeMsg(`Removed ${effKey} from ${targetProfile}`);
-      renderAdminTools();
-    } else {
-      setHomeMsg(`${effKey} not active on ${targetProfile}`);
-    }
+    if (!targetProfile) return;
+    stageEffectChange(targetProfile, (staged) => {
+      if (staged.effects) delete staged.effects[effKey];
+    }, `Staged removal of ${effKey} from ${targetProfile}.`);
   });
 
   const btnClearEffects = document.createElement("button");
   btnClearEffects.className = "danger";
-  btnClearEffects.textContent = "Clear All Effects";
+  btnClearEffects.textContent = "Stage Clear All Effects";
   btnClearEffects.addEventListener("click", () => {
     const targetProfile = String(profileSel.value || "").trim();
     if (!targetProfile) return;
-    const loadedEff = safeLoad(targetProfile);
-    if (!loadedEff) return;
-    loadedEff.effects = {};
-    loadedEff.updatedAt = (typeof nowIso === 'function' ? nowIso() : new Date().toISOString());
-    safeSave(targetProfile, loadedEff);
-    if (state && state.profile === targetProfile) {
-      state.effects = {};
-      if (typeof renderEffectsUi === 'function') renderEffectsUi();
-    }
-    setHomeMsg(`Cleared all effects from ${targetProfile}`);
-    renderAdminTools();
+    stageEffectChange(targetProfile, (staged) => {
+      staged.effects = {};
+    }, `Staged clear all effects for ${targetProfile}.`);
   });
 
   const btnApplyAll = document.createElement("button");
   btnApplyAll.className = "secondary";
-  btnApplyAll.textContent = "Apply to ALL Users";
-  btnApplyAll.title = "Apply this effect to every saved profile";
+  btnApplyAll.textContent = "Stage for ALL Users";
+  btnApplyAll.title = "Stage this effect for every saved profile - only saved when you click Save Staged";
   btnApplyAll.addEventListener("click", () => {
     const effKey = String(effectSel.value || "").trim();
     const durSec = parseFloat(effectDurInput.value || "15");
     const durMs = Math.max(1000, Math.floor((isFinite(durSec) ? durSec : 15) * 1000));
     const allProfiles = (typeof listSaveProfiles === 'function') ? listSaveProfiles() : [];
-    let count = 0;
     for (const prof of allProfiles) {
-      if (prof === ADMIN_PROFILE) continue; // skip admin god
-      const ld = safeLoad(prof);
-      if (!ld) continue;
-      ld.effects = ld.effects || {};
-      ld.effects[effKey] = { key: effKey, expiresAt: (typeof nowMs === 'function' ? nowMs() : Date.now()) + durMs };
-      if (effKey === 'bleeding') ld.effects[effKey].nextTickAt = (typeof nowMs === 'function' ? nowMs() : Date.now()) + 5000;
-      if (effKey === 'aether') ld.effects[effKey].nextTickAt = (typeof nowMs === 'function' ? nowMs() : Date.now()) + 4000;
-      if (effKey === 'poisoned') ld.effects[effKey].nextTickAt = (typeof nowMs === 'function' ? nowMs() : Date.now()) + 4000;
-      ld.updatedAt = (typeof nowIso === 'function' ? nowIso() : new Date().toISOString());
-      if (safeSave(prof, ld)) count++;
+      if (prof === ADMIN_PROFILE) continue;
+      stageEffectChange(prof, (staged) => {
+        staged.effects = staged.effects || {};
+        staged.effects[effKey] = { key: effKey, expiresAt: (typeof nowMs === 'function' ? nowMs() : Date.now()) + durMs };
+        if (effKey === 'bleeding') staged.effects[effKey].nextTickAt = (typeof nowMs === 'function' ? nowMs() : Date.now()) + 5000;
+        if (effKey === 'aether') staged.effects[effKey].nextTickAt = (typeof nowMs === 'function' ? nowMs() : Date.now()) + 4000;
+        if (effKey === 'poisoned') staged.effects[effKey].nextTickAt = (typeof nowMs === 'function' ? nowMs() : Date.now()) + 4000;
+      }, `Staged ${effKey} for ${prof}.`);
     }
-    setHomeMsg(`Applied ${effKey} to ${count} users`);
+  });
+
+  const btnSaveStaged = document.createElement("button");
+  btnSaveStaged.textContent = "[ SAVE STAGED EFFECTS ]";
+  btnSaveStaged.style.background = "linear-gradient(180deg, #2ad37b, #1a9e5a)";
+  btnSaveStaged.style.color = "#fff";
+  btnSaveStaged.title = "Save all staged effect changes - they will take effect when player next joins";
+  btnSaveStaged.addEventListener("click", () => {
+    const keys = Object.keys(adminStagedEffectSaves);
+    if (keys.length === 0) { setHomeMsg("No staged effects to save"); return; }
+    let okCount = 0;
+    for (const prof of keys) {
+      const staged = adminStagedEffectSaves[prof];
+      if (!staged) continue;
+      if (safeSave(prof, staged)) okCount++;
+    }
+    // clear staged after save
+    for (const prof of keys) delete adminStagedEffectSaves[prof];
+    setHomeMsg(`Saved staged effects for ${okCount} users. They will have effects on next join.`);
+    renderHomeSaves();
+    renderAdminTools();
   });
 
   effectBtnRow.appendChild(btnApplyEffect);
   effectBtnRow.appendChild(btnRemoveEffect);
   effectBtnRow.appendChild(btnClearEffects);
   effectBtnRow.appendChild(btnApplyAll);
+  effectBtnRow.appendChild(btnSaveStaged);
   effectWrap.appendChild(effectBtnRow);
 
-  // Show current effects of selected profile
+  // Show staged status and current effects
+  const stagedInfo = document.createElement("div");
+  stagedInfo.className = "hint";
+  stagedInfo.style.whiteSpace = "pre-wrap";
+  stagedInfo.style.marginTop = "6px";
+  const stagedKeys = Object.keys(adminStagedEffectSaves);
+  if (stagedKeys.length > 0) {
+    let txt = `Staged changes (not yet saved):
+`;
+    for (const prof of stagedKeys) {
+      const st = adminStagedEffectSaves[prof];
+      const effs = st && st.effects ? Object.keys(st.effects).join(", ") : "(no effects)";
+      txt += `- ${prof}: ${effs || "(cleared)"}
+`;
+    }
+    stagedInfo.textContent = txt;
+    stagedInfo.style.color = "#2ad37b";
+    stagedInfo.style.fontWeight = "700";
+  } else {
+    stagedInfo.textContent = "No staged effect changes. Staged changes only apply when you click SAVE.";
+  }
+  effectWrap.appendChild(stagedInfo);
+
   const currentEffDiv = document.createElement("div");
   currentEffDiv.className = "hint";
   currentEffDiv.style.whiteSpace = "pre-wrap";
   currentEffDiv.style.marginTop = "6px";
   try {
     const selProf = String(profileSel.value || "").trim();
-    const ld = selProf ? safeLoad(selProf) : null;
-    if (ld && ld.effects) {
-      const effs = Object.values(ld.effects).map(e => {
+    const base = selProf ? safeLoad(selProf) : null;
+    const staged = selProf ? adminStagedEffectSaves[selProf] : null;
+    const effective = staged || base;
+    if (effective && effective.effects) {
+      const effs = Object.values(effective.effects).map(e => {
         if (!e) return null;
         const key = e.key;
         let sec = 0;
         if (typeof e.pausedRemaining === 'number') sec = Math.ceil(e.pausedRemaining/1000);
         else if (typeof e.expiresAt === 'number') sec = Math.max(0, Math.ceil((e.expiresAt - (typeof nowMs === 'function' ? nowMs() : Date.now()))/1000));
-        return `${key}: ${sec}s${typeof e.pausedRemaining === 'number' ? ' (paused)' : ''}`;
+        const stagedMark = staged ? " [STAGED]" : "";
+        return `${key}: ${sec}s${typeof e.pausedRemaining === 'number' ? ' (paused)' : ''}${stagedMark}`;
       }).filter(Boolean).join(", ");
-      currentEffDiv.textContent = effs ? `Current effects on ${selProf}: ${effs}` : `No active effects on ${selProf}`;
+      currentEffDiv.textContent = effs ? `Effects on ${selProf}${staged ? " (STAGED view)" : " (saved view)"}: ${effs}` : `No active effects on ${selProf}`;
     } else {
-      currentEffDiv.textContent = selProf ? `No effects on ${selProf}` : "Select a profile to see effects";
+      currentEffDiv.textContent = selProf ? `No effects on ${selProf}` : "Select a profile";
     }
   } catch(e) {
     currentEffDiv.textContent = "Could not load effects: " + e;
@@ -4618,6 +4659,9 @@ function renderAdminTools() {
     renderAdminTools();
   });
 
+  // Hook Save Changes button to also merge staged effects for that profile
+  // Find the save button later in the DOM? We'll patch the Save button handler if possible
+  // The Save Changes button is created earlier as btnSaveUser - we need to ensure its handler checks staged saves
 
   adminToolsEl.appendChild(effectWrap);
   scheduleRestoreFocus();
