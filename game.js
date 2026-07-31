@@ -5139,8 +5139,43 @@ function renderLog() {
   outputEl.scrollTop = outputEl.scrollHeight;
 }
 
+const PLAYER_MAX_LEVEL = 100;
+const ADMIN_MAX_LEVEL = 999;
+
 function xpToNext(level) {
-  return level * 100;
+  const lvl = Math.max(1, Math.floor(level||1));
+  // Admin can go beyond player cap, but with steeper curve
+  if (lvl >= ADMIN_MAX_LEVEL) return Infinity;
+  if (lvl >= PLAYER_MAX_LEVEL) {
+    // If normal player at cap, no more XP needed unless admin
+    // Check if current state is admin - allow admin to continue, but normal capped
+    try {
+      if (typeof state !== 'undefined' && state && typeof isAdminProfile === 'function' && !isAdminProfile(state.profile)) {
+        return Infinity;
+      }
+    } catch(e) {}
+    // For admin beyond player cap, use even steeper curve
+    if (lvl < ADMIN_MAX_LEVEL) {
+      // Admin curve beyond 100: exponential
+      let base = lvl * 150;
+      base += Math.pow(lvl - 80, 2) * 25;
+      base += Math.pow(Math.max(0, lvl - 100), 2) * 40;
+      return Math.floor(base);
+    }
+    return Infinity;
+  }
+  let base = lvl * 100;
+  if (lvl >= 50) base += Math.pow(lvl - 50, 2) * 5;
+  if (lvl >= 80) base += Math.pow(lvl - 80, 2) * 15;
+  if (lvl >= 90) base += Math.pow(lvl - 90, 2) * 30;
+  return Math.floor(base);
+}
+
+function isPlayerAtMaxLevel(s) {
+  const st = s || (typeof state !== 'undefined' ? state : null);
+  if (!st) return false;
+  if (typeof isAdminProfile === 'function' && isAdminProfile(st.profile)) return false; // admin can exceed
+  return (st.level || 1) >= PLAYER_MAX_LEVEL;
 }
 
 function ensureCompanionStarterSkills(c) {
@@ -5259,18 +5294,47 @@ function gainXp(amount) {
     applyAdminGodMode(state);
     return;
   }
+  // Cap normal players at PLAYER_MAX_LEVEL
+  if (isPlayerAtMaxLevel(state)) {
+    if (state.level < PLAYER_MAX_LEVEL) state.level = PLAYER_MAX_LEVEL;
+    state.xp = 0;
+    return;
+  }
   const amt = Math.max(0, Math.floor(amount || 0));
   state.xp += amt;
   while (state.xp >= xpToNext(state.level)) {
-    state.xp -= xpToNext(state.level);
+    // Prevent leveling beyond cap for non-admin
+    if ((state.level || 1) >= PLAYER_MAX_LEVEL && !(typeof isAdminProfile === 'function' && isAdminProfile(state.profile))) {
+      state.level = PLAYER_MAX_LEVEL;
+      state.xp = 0;
+      appendLog(`🏆 Max Level Reached! You are now Level ${PLAYER_MAX_LEVEL} (Player Cap). Admin cap is 999.`);
+      break;
+    }
+    const needed = xpToNext(state.level);
+    if (!isFinite(needed) || needed === Infinity) {
+      state.xp = 0;
+      break;
+    }
+    state.xp -= needed;
     state.level += 1;
+    // Clamp
+    if (state.level > PLAYER_MAX_LEVEL && !(typeof isAdminProfile === 'function' && isAdminProfile(state.profile))) {
+      state.level = PLAYER_MAX_LEVEL;
+      state.xp = 0;
+      appendLog(`🏆 Max Level Reached! Level ${PLAYER_MAX_LEVEL} cap.`);
+      break;
+    }
     state.skillPoints = (state.skillPoints || 0) + 10;
     state.maxHp += 6;
     state.hp = Math.min(playerMaxHp(), state.hp + 6);
     state.mana = Math.min(playerMaxMana(), state.mana + 4);
-    appendLog(`⭐ Level Up! You reached Level ${state.level}.`);
+    appendLog(`⭐ Level Up! You reached Level ${state.level}${state.level >= PLAYER_MAX_LEVEL ? ' (MAX)' : ''}.`);
     appendLog("You gained 10 Skill Points.");
     queueLevelUpDraftLevel(state, state.level);
+    if (state.level >= PLAYER_MAX_LEVEL && !(typeof isAdminProfile === 'function' && isAdminProfile(state.profile))) {
+      state.xp = 0;
+      break;
+    }
   }
   if (amt > 0) gainCompanionXp(amt, { rate: 1.0, deadRate: 0.4 });
   startNextLevelUpDraftIfNeeded(state);
@@ -8176,9 +8240,24 @@ function genMissions(count) {
     const diff = pickDifficultyByIndex(i);
     const d = DIFFICULTY[diff];
     const faction = FACTIONS[(i + 1) % FACTIONS.length];
-    const recLevel = d.recLevel + Math.floor(i / 10);
-    const xp = Math.max(1, Math.floor((d.baseXp || 0) + recLevel * (d.xpPerLevel || 0)));
-    const gold = Math.max(0, Math.floor((d.baseGold || 0) + recLevel * (d.goldPerLevel || 0)));
+    // Remodule: quest recLevel now scales to PLAYER_MAX_LEVEL (100) not admin 999
+    // Old: d.recLevel + floor(i/10) max ~75
+    // New: progressive scaling to reach 100 at high end, with difficulty weighting
+    const progress = i / Math.max(1, count - 1); // 0..1
+    // Difficulty adds offset, plus progressive
+    // Easy quests stay low 1..40, Legendary reach up to 100
+    let levelScale = 0;
+    if (diff === "easy") levelScale = Math.floor(progress * 35); // 1..36
+    else if (diff === "normal") levelScale = Math.floor(progress * 55); // 4..59
+    else if (diff === "hard") levelScale = Math.floor(progress * 70); // 8..78
+    else if (diff === "elite") levelScale = Math.floor(progress * 85); // 12..97
+    else levelScale = Math.floor(progress * 90); // legendary 16..106 clamped to 100
+    let recLevel = d.recLevel + levelScale;
+    recLevel = Math.max(1, Math.min(100, recLevel));
+    // XP and gold scaled slightly higher for high level quests to help reach cap
+    const tierMult = 1 + (recLevel / 100) * 0.8;
+    const xp = Math.max(1, Math.floor(((d.baseXp || 0) + recLevel * (d.xpPerLevel || 0)) * tierMult));
+    const gold = Math.max(0, Math.floor(((d.baseGold || 0) + recLevel * (d.goldPerLevel || 0)) * (1 + recLevel * 0.02)));
     missions.push({
       id: `m${i + 1}`,
       kind: "mission",
@@ -8201,7 +8280,9 @@ function genSideQuests(count) {
   const exileA = ["Ash", "Lantern", "Moon", "Cinder", "Iron", "Glass", "Fog", "Shadow", "Salt", "Storm", "Dawn", "Grave", "Gutter", "Hollow", "Bitter", "Black", "White", "Copper", "Sable", "Bright"];
   const exileB = ["Gate", "Row", "Spur", "Crossing", "Stairs", "Arcade", "Spire", "Canal", "Cistern", "Shrine", "Bridge", "Vault", "Yard", "Lane", "Court", "Bazaar", "Foundry", "Chapel", "Wharf", "Keep"];
   for (let i = 0; i < count; i++) {
-    const minLevel = 1 + Math.floor(i / 15);
+    // Remodule: side quest minLevel scales to PLAYER_MAX 100
+    const progress = i / Math.max(1, count - 1);
+    const minLevel = Math.max(1, Math.min(100, 1 + Math.floor(progress * 99)));
     const faction = FACTIONS[(i + 2) % FACTIONS.length];
     let place = places[i % places.length];
     if (seed) {
@@ -8209,6 +8290,9 @@ function genSideQuests(count) {
       const hb = (hashString(`town:${seed}:place:${i}:b`) >>> 0);
       place = `${exileA[ha % exileA.length]} ${exileB[hb % exileB.length]}`;
     }
+    // XP scales better for high level side quests to help reach cap
+    const xp = Math.max(18, Math.floor((18 + i * 1.7) * (1 + minLevel * 0.03)));
+    const gold = Math.max(6, Math.floor((6 + i * 0.6) * (1 + minLevel * 0.02)));
     quests.push({
       id: `s${i + 1}`,
       kind: "side",
@@ -8216,8 +8300,8 @@ function genSideQuests(count) {
       minLevel,
       faction,
       place,
-      xp: 18 + Math.floor(i * 1.7),
-      gold: 6 + Math.floor(i * 0.6),
+      xp,
+      gold,
     });
   }
   return quests;

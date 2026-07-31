@@ -209,8 +209,43 @@ function renderLog() {
   outputEl.scrollTop = outputEl.scrollHeight;
 }
 
+const PLAYER_MAX_LEVEL = 100;
+const ADMIN_MAX_LEVEL = 999;
+
 function xpToNext(level) {
-  return level * 100;
+  const lvl = Math.max(1, Math.floor(level||1));
+  // Admin can go beyond player cap, but with steeper curve
+  if (lvl >= ADMIN_MAX_LEVEL) return Infinity;
+  if (lvl >= PLAYER_MAX_LEVEL) {
+    // If normal player at cap, no more XP needed unless admin
+    // Check if current state is admin - allow admin to continue, but normal capped
+    try {
+      if (typeof state !== 'undefined' && state && typeof isAdminProfile === 'function' && !isAdminProfile(state.profile)) {
+        return Infinity;
+      }
+    } catch(e) {}
+    // For admin beyond player cap, use even steeper curve
+    if (lvl < ADMIN_MAX_LEVEL) {
+      // Admin curve beyond 100: exponential
+      let base = lvl * 150;
+      base += Math.pow(lvl - 80, 2) * 25;
+      base += Math.pow(Math.max(0, lvl - 100), 2) * 40;
+      return Math.floor(base);
+    }
+    return Infinity;
+  }
+  let base = lvl * 100;
+  if (lvl >= 50) base += Math.pow(lvl - 50, 2) * 5;
+  if (lvl >= 80) base += Math.pow(lvl - 80, 2) * 15;
+  if (lvl >= 90) base += Math.pow(lvl - 90, 2) * 30;
+  return Math.floor(base);
+}
+
+function isPlayerAtMaxLevel(s) {
+  const st = s || (typeof state !== 'undefined' ? state : null);
+  if (!st) return false;
+  if (typeof isAdminProfile === 'function' && isAdminProfile(st.profile)) return false; // admin can exceed
+  return (st.level || 1) >= PLAYER_MAX_LEVEL;
 }
 
 function ensureCompanionStarterSkills(c) {
@@ -329,18 +364,47 @@ function gainXp(amount) {
     applyAdminGodMode(state);
     return;
   }
+  // Cap normal players at PLAYER_MAX_LEVEL
+  if (isPlayerAtMaxLevel(state)) {
+    if (state.level < PLAYER_MAX_LEVEL) state.level = PLAYER_MAX_LEVEL;
+    state.xp = 0;
+    return;
+  }
   const amt = Math.max(0, Math.floor(amount || 0));
   state.xp += amt;
   while (state.xp >= xpToNext(state.level)) {
-    state.xp -= xpToNext(state.level);
+    // Prevent leveling beyond cap for non-admin
+    if ((state.level || 1) >= PLAYER_MAX_LEVEL && !(typeof isAdminProfile === 'function' && isAdminProfile(state.profile))) {
+      state.level = PLAYER_MAX_LEVEL;
+      state.xp = 0;
+      appendLog(`🏆 Max Level Reached! You are now Level ${PLAYER_MAX_LEVEL} (Player Cap). Admin cap is 999.`);
+      break;
+    }
+    const needed = xpToNext(state.level);
+    if (!isFinite(needed) || needed === Infinity) {
+      state.xp = 0;
+      break;
+    }
+    state.xp -= needed;
     state.level += 1;
+    // Clamp
+    if (state.level > PLAYER_MAX_LEVEL && !(typeof isAdminProfile === 'function' && isAdminProfile(state.profile))) {
+      state.level = PLAYER_MAX_LEVEL;
+      state.xp = 0;
+      appendLog(`🏆 Max Level Reached! Level ${PLAYER_MAX_LEVEL} cap.`);
+      break;
+    }
     state.skillPoints = (state.skillPoints || 0) + 10;
     state.maxHp += 6;
     state.hp = Math.min(playerMaxHp(), state.hp + 6);
     state.mana = Math.min(playerMaxMana(), state.mana + 4);
-    appendLog(`⭐ Level Up! You reached Level ${state.level}.`);
+    appendLog(`⭐ Level Up! You reached Level ${state.level}${state.level >= PLAYER_MAX_LEVEL ? ' (MAX)' : ''}.`);
     appendLog("You gained 10 Skill Points.");
     queueLevelUpDraftLevel(state, state.level);
+    if (state.level >= PLAYER_MAX_LEVEL && !(typeof isAdminProfile === 'function' && isAdminProfile(state.profile))) {
+      state.xp = 0;
+      break;
+    }
   }
   if (amt > 0) gainCompanionXp(amt, { rate: 1.0, deadRate: 0.4 });
   startNextLevelUpDraftIfNeeded(state);
