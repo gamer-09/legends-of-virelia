@@ -1837,6 +1837,130 @@ function worldTick(actionLabel) {
   maybeQueueHostileEncounter(actionLabel);
 }
 
+function maybeQueueTownAttacks(actionLabel) {
+  if (!state) return false;
+  if (isAdminProfile(state.profile)) return false;
+  normalizeState(state);
+  if (state.world.pendingEvent) return false;
+  if (state.activeQuest) return false;
+  if (!state.character?.created) return false;
+
+  const nid = state.nodeId || "crossroads";
+  const inHub = nid === "crossroads" || nid === "market" || nid === "gate" || nid === "tavern";
+  if (!inHub) return false;
+
+  const label = String(actionLabel || "");
+  if (/^Accept:/i.test(label)) return false;
+  if (label === "Save") return false;
+
+  const roll = Math.random();
+  // 3 times random events for town attacks: single, group, horde
+  if (roll < 0.008) {
+    // Single monster attacks town/player - Level scales with player, but can be far above
+    const lvl = Math.max(1, Math.floor(state.level || 1));
+    // Single monster can be 10-50 levels above player for challenge, success drops to 5-2%
+    const extraLevels = 10 + Math.floor(Math.random() * 40);
+    const mobLevel = lvl + extraLevels;
+    const tier = Math.min(5, 1 + Math.floor(mobLevel / 140));
+    const idx = (tier - 1) * 60 + 1 + Math.floor(Math.random() * 60);
+    const def = mobDef(idx);
+    const ev = createCombatEvent(state, "town_single", def);
+    ev.encounterKind = "town_single";
+    // Scale to mobLevel
+    for (const e of ev.enemies) {
+      e.recLevel = mobLevel;
+      e.maxHp = Math.floor(e.maxHp * (1 + mobLevel * 0.12));
+      e.hp = e.maxHp;
+      e.atk = Math.floor(e.atk * (1 + mobLevel * 0.08));
+      e.name = `[SINGLE Lv${mobLevel}] ${e.name} attacks town!`;
+    }
+    ev.log = [
+      `⚠️ Town Attack - SINGLE Monster (Lv${mobLevel})!`,
+      `A lone ${ev.enemies[0].name} rushes the town gates.`,
+      `If you are far below Lv${mobLevel}, success rate drops to 5% or 2%!`,
+    ];
+    state.world.pendingEvent = ev;
+    return true;
+  } else if (roll < 0.015) {
+    // Group of 3-4 monsters attacks
+    const lvl = Math.max(1, Math.floor(state.level || 1));
+    const extraLevels = 5 + Math.floor(Math.random() * 30);
+    const mobLevel = lvl + extraLevels;
+    const tier = Math.min(5, 1 + Math.floor(mobLevel / 140));
+    const ev = createCombatEvent(state, "town_group", mobDef((tier-1)*60+10));
+    ev.encounterKind = "town_group";
+    // Add 2-3 extra
+    const extraCount = 2 + Math.floor(Math.random()*2);
+    for (let i=0;i<extraCount;i++) {
+      const idx = (tier - 1) * 60 + 1 + Math.floor(Math.random() * 60);
+      const def = mobDef(idx);
+      const e = { ...def, hp: def.maxHp, maxHp: Math.floor(def.maxHp * (1 + mobLevel*0.12)), atk: Math.floor(def.atk * (1 + mobLevel*0.08)) };
+      e.recLevel = mobLevel;
+      e.name = `[GROUP Lv${mobLevel}] ${e.name}`;
+      e.hp = e.maxHp;
+      ev.enemies.push(e);
+    }
+    for (const e of ev.enemies) {
+      e.recLevel = mobLevel;
+      e.maxHp = Math.floor((e.maxHp || 40) * (1 + mobLevel * 0.12));
+      e.hp = e.maxHp;
+      e.atk = Math.floor((e.atk || 8) * (1 + mobLevel * 0.08));
+      e.name = e.name.includes("Lv") ? e.name : `[GROUP Lv${mobLevel}] ${e.name} attacks!`;
+    }
+    ev.log = [
+      `⚠️ Town Attack - GROUP of ${ev.enemies.length} monsters (Lv${mobLevel})!`,
+      `A pack rushes from the wilds. Town militia calls for help.`,
+      `Far above your level? Success drops to 5-2%!`,
+    ];
+    state.world.pendingEvent = ev;
+    return true;
+  } else if (roll < 0.020) {
+    // Horde attacks town - 6-9 monsters, like mini siege
+    const lvl = Math.max(1, Math.floor(state.level || 1));
+    const extraLevels = Math.floor(Math.random() * 20);
+    const mobLevel = Math.max(60, lvl + extraLevels); // at least 60 as requested for horde
+    const tier = Math.min(5, 1 + Math.floor(mobLevel / 140));
+    const count = 6 + Math.floor(Math.random()*4);
+    const enemies = [];
+    for (let i=0;i<count;i++) {
+      const idx = (tier - 1) * 60 + 1 + Math.floor(Math.random() * 60);
+      const def = mobDef(idx);
+      const e = { ...def, hp: def.maxHp };
+      e.recLevel = mobLevel;
+      e.maxHp = Math.floor((e.maxHp || 40) * (2.0 + mobLevel * 0.10));
+      e.hp = e.maxHp;
+      e.atk = Math.floor((e.atk || 8) * (1.5 + mobLevel * 0.07));
+      e.name = `[HORDE Lv${mobLevel}] ${e.name}`;
+      enemies.push(e);
+    }
+    const ev = {
+      kind: "combat",
+      fromNode: state.nodeId || "crossroads",
+      stage: "combat",
+      encounterKind: "town_horde",
+      log: [
+        `🚨 Town Attack - HORDE of ${count} monsters (Lv${mobLevel})!`,
+        `Horns blare! A horde crashes into town! This is 3rd type of random town attack.`,
+        `If you are far below Lv${mobLevel}, success rate drops to 2%!`,
+      ],
+      enemies,
+      guard: {},
+      defeated: {},
+      didLoot: false,
+      didSearch: false,
+      didReward: false,
+      partyDmgBoost: 0,
+      partyDmgBoostTurns: 0,
+      escapeBoost: 0,
+      escapeBoostTurns: 0,
+      quest: null,
+    };
+    state.world.pendingEvent = ev;
+    return true;
+  }
+  return false;
+}
+
 function maybeQueueHostileEncounter(actionLabel) {
   if (!state) return;
   if (isAdminProfile(state.profile)) return;
@@ -1852,6 +1976,9 @@ function maybeQueueHostileEncounter(actionLabel) {
   const label = String(actionLabel || "");
   if (/^Accept:/i.test(label)) return;
   if (label === "Save") return;
+
+  // First try town attacks (3 types: single, group, horde)
+  if (maybeQueueTownAttacks(actionLabel)) return;
 
   const chance = 0.015;
   if (Math.random() >= chance) return;

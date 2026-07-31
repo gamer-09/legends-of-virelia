@@ -5810,6 +5810,36 @@ function executeCombatSkill(skillKey, ev) {
   if (!enemies.length) return false;
   const target = enemies[0];
 
+  // Spells as hard as level suggests - if player level far below skill tier requirement or mob level, success drops to 5% or 2%
+  const playerLvl = Math.max(1, Math.floor(state.level || 1));
+  const skillTier = Math.max(1, Math.floor(def.tier || 1));
+  // Map skill tier to required level for spells: tier1=1, tier2=25, tier3=70, tier4=150, tier5=300, tier6=500, tier7=650
+  const tierReq = {1:1, 2:25, 3:70, 4:150, 5:300, 6:500, 7:650}[skillTier] || (skillTier*100);
+  const tierDiff = tierReq - playerLvl;
+  let spellSuccessRate = 1.0;
+  if (tierDiff >= 50) spellSuccessRate = 0.02;
+  else if (tierDiff >= 30) spellSuccessRate = 0.05;
+  else if (tierDiff >= 15) spellSuccessRate = 0.25;
+  else if (tierDiff >= 5) spellSuccessRate = 0.55;
+
+  // Also check mob rec level vs player for spell
+  const mobRec = getEnemyRecLevelForCombat(ev);
+  const mobDiff = mobRec - playerLvl;
+  if (mobDiff >= 50) spellSuccessRate = Math.min(spellSuccessRate, 0.02);
+  else if (mobDiff >= 30) spellSuccessRate = Math.min(spellSuccessRate, 0.05);
+
+  if (spellSuccessRate < 1.0 && Math.random() > spellSuccessRate) {
+    pushCombatLog(ev, `🔮 [SPELL LEVEL GAP] ${def.label} (Tier ${skillTier} req Lv${tierReq}) vs you Lv${playerLvl} & Mob Lv${mobRec} - success dropped to ${Math.round(spellSuccessRate*100)}%! Spell fizzles!`);
+    // Still spend mana? Make it cost half mana on fail
+    const baseCost = 4 + skillTier * 2 + (def.powerful ? 2 : 0);
+    const manaCost = Math.max(1, Math.floor(baseCost * 0.5));
+    state.mana = Math.max(0, (state.mana||0) - manaCost);
+    return true;
+  } else if (spellSuccessRate < 1.0) {
+    pushCombatLog(ev, `⚠️ ${def.label} hard for your level (Tier ${skillTier} req Lv${tierReq}) - only ${Math.round(spellSuccessRate*100)}% success, you push through!`);
+  }
+
+
   const tier = Math.max(1, Math.floor(def.tier || 1));
   const pow = def.powerful ? 1 : 0;
   const focus = String(def.focus || "").toLowerCase();
@@ -6413,45 +6443,76 @@ function createCrossroadsSiegeCombatEvent(s, phase) {
   };
 
   if (ph === "horde") {
-    const count = clamp(8 + (seed % 4), 8, 11);
+    // Fixed: horde now has mix of level 60 and 80 monsters (as requested), not just tier 5 random
+    // Level 60 = tier ~3-4, Level 80 = tier 4, both scaled to be challenging
+    const count = clamp(10 + (seed % 5), 10, 14); // Slightly larger horde
     const enemies = [];
     for (let i = 0; i < count; i++) {
-      const def = mobDef(pickTierIdx(7 + i * 3));
+      // Alternate between level 60 and 80 for variety: first half 60, second half 80
+      const targetLevel = (i % 2 === 0) ? 60 : 80;
+      // Pick tier based on target level: 60 -> tier 3, 80 -> tier 3-4
+      const tierForLevel = targetLevel < 70 ? 3 : 4;
+      const idxBase = (tierForLevel - 1) * 60 + 1;
+      const def = mobDef(idxBase + ((seed + i * 13) % 60));
       const e = { ...def, hp: def.maxHp };
-      e.maxHp = Math.max(12, Math.floor((e.maxHp || 10) * 1.10 + 16));
+      // Scale to exact level 60 or 80: HP = base * (1 + level*0.12), Atk = base * (1 + level*0.08)
+      const levelScale = targetLevel;
+      e.maxHp = Math.max(80, Math.floor((e.maxHp || 40) * (1.8 + levelScale * 0.14) + levelScale * 2));
       e.hp = e.maxHp;
-      e.atk = Math.max(4, Math.floor((e.atk || 5) * 1.10 + 6));
-      e.acc = clamp((e.acc || 0.72) + 0.02, 0.55, 0.93);
-      if (i === 0 && Math.random() < 0.65) e.powerful = true;
+      e.atk = Math.max(12, Math.floor((e.atk || 8) * (1.2 + levelScale * 0.09) + levelScale * 0.6));
+      e.acc = clamp((e.acc || 0.70) + 0.04 + levelScale * 0.001, 0.60, 0.92);
+      e.recLevel = targetLevel;
+      e.name = `${targetLevel === 60 ? 'Lvl60' : 'Lvl80'} ${e.name}`;
+      if (i === 0 && Math.random() < 0.75) e.powerful = true;
+      // Also apply normal scaling for player level if player is higher than 60/80
       scaleEnemyForPlayerLevel(e, s, "siege");
       enemies.push(e);
     }
     ev.enemies = enemies;
     ev.log = [
-      "🏰 Crossroads Siege — The Hostel.",
-      "A horde crashes into the streets. You brace at the hostel steps.",
-      "Dozens of adventurers rally beside you.",
+      "🏰 Crossroads Siege — The Horde (Levels 60 & 80).",
+      `A mixed horde crashes in: ${Math.ceil(count/2)} at Level 60 and ${Math.floor(count/2)} at Level 80.`,
+      "Dozens of adventurers rally beside you. This will be hard for low levels!",
     ];
     return ev;
   }
 
+  // Boss is now legendary rank level 90 or 100 (as requested), not just 4.6x HP
   const base = mobDef(pickTierIdx(33));
   const boss = { ...base, hp: base.maxHp };
   boss.powerful = true;
-  boss.name = `Overlord ${base.name}`;
-  boss.maxHp = Math.max(120, Math.floor((boss.maxHp || 40) * 4.6 + 420));
+  // Legendary rank boss level 90 or 100 (randomly chosen for variety)
+  const bossLevel = (seed % 2 === 0) ? 90 : 100;
+  boss.recLevel = bossLevel;
+  boss.tier = 5;
+  boss.legendaryRank = true;
+  boss.name = `Overlord ${base.name} [LEGENDARY Lv${bossLevel}]`;
+  // Scale boss to legendary level 90/100: massive HP and ATK
+  // HP: base 40 * 8.5 + 900 for 90, or *9.5+1100 for 100
+  const bossHpMult = bossLevel === 90 ? 8.5 : 9.5;
+  const bossAtkMult = bossLevel === 90 ? 3.8 : 4.2;
+  boss.maxHp = Math.max(800, Math.floor((boss.maxHp || 40) * bossHpMult + (bossLevel * 18) + 600));
   boss.hp = boss.maxHp;
-  boss.atk = Math.max(18, Math.floor((boss.atk || 8) * 2.15 + 22));
-  boss.acc = clamp((boss.acc || 0.75) + 0.10, 0.60, 0.95);
+  boss.atk = Math.max(45, Math.floor((boss.atk || 8) * bossAtkMult + bossLevel * 1.2 + 35));
+  boss.acc = clamp((boss.acc || 0.75) + 0.14 + bossLevel * 0.0008, 0.68, 0.96);
   boss.siegeBoss = true;
   boss.siegeBossHealCd = 0;
-  scaleEnemyForPlayerLevel(boss, s, "siege");
+  // Do NOT scale down for low level players - keep boss hard as level suggests
+  // But if player is higher than boss level, scale up slightly
+  const playerLvl = Math.max(1, Math.floor(s?.level || 1));
+  if (playerLvl > bossLevel) {
+    const over = playerLvl - bossLevel;
+    boss.maxHp = Math.floor(boss.maxHp * (1 + over * 0.04));
+    boss.hp = boss.maxHp;
+    boss.atk = Math.floor(boss.atk * (1 + over * 0.03));
+  }
+  // If player is far below boss level (e.g., level 60 vs boss 90), success rate will be dropped to 2-5% in combat logic
 
   ev.enemies = [boss];
   ev.log = [
-    "🔥 Crossroads Siege — The Overlord.",
-    "The horde breaks… and something larger steps through the smoke.",
-    "This ends here.",
+    `🔥 Crossroads Siege — The Overlord [LEGENDARY Lv${bossLevel}].`,
+    `A legendary rank boss emerges: Level ${bossLevel}! Its power is overwhelming for low levels.`,
+    "This ends here - if you are far below its level, success rate drops to 2-5%.",
   ];
   return ev;
 }
@@ -6735,11 +6796,51 @@ function siegeSwarmAlliesAct(ev) {
   }
 }
 
+
+function getEnemyRecLevelForCombat(ev) {
+  if (!ev || !ev.enemies || !ev.enemies.length) return 1;
+  let maxRec = 1;
+  for (const e of ev.enemies) {
+    if (!e) continue;
+    const rec = e.recLevel || e.level || (e.tier ? (1 + (e.tier-1)*140) : 1);
+    if (rec > maxRec) maxRec = rec;
+  }
+  return maxRec;
+}
+
+function getPlayerSuccessRateVsMobFarAbove() {
+  if (!state) return 1.0;
+  const playerLvl = Math.max(1, Math.floor(state.level || 1));
+  const pending = state.world?.pendingEvent;
+  if (!pending || pending.kind !== 'combat') return 1.0;
+  const mobRec = getEnemyRecLevelForCombat(pending);
+  const diff = mobRec - playerLvl;
+  if (diff >= 50) return 0.02; // 2% success if 50+ levels above
+  if (diff >= 30) return 0.05; // 5% success if 30+ levels above
+  if (diff >= 20) return 0.15;
+  if (diff >= 10) return 0.35;
+  return 1.0;
+}
+
+
 function partyAutoAttack(ev) {
   if (!state || !ev) return;
   const enemies = aliveEnemies(ev);
   if (!enemies.length) return;
   const target = enemies[0];
+
+  // If mob far above player level, success rate drops to 5% or 2% as requested
+  const successRate = getPlayerSuccessRateVsMobFarAbove();
+  if (successRate < 1.0) {
+    if (Math.random() > successRate) {
+      const mobRec = getEnemyRecLevelForCombat(ev);
+      const playerLvl = Math.max(1, Math.floor(state.level || 1));
+      pushCombatLog(ev, `💀 [LEVEL GAP] Mob Lv${mobRec} far above you Lv${playerLvl}! Success rate dropped to ${Math.round(successRate*100)}% - attack fumbles!`);
+      return;
+    } else if (successRate <= 0.05) {
+      pushCombatLog(ev, `⚠️ Far above level! Only ${Math.round(successRate*100)}% success chance - you barely manage to strike!`);
+    }
+  }
 
   let boost = (ev.partyDmgBoostTurns || 0) > 0 ? (1 + (ev.partyDmgBoost || 0)) : 1;
   // Effects do meaningful combat
@@ -9345,6 +9446,130 @@ function worldTick(actionLabel) {
   maybeQueueHostileEncounter(actionLabel);
 }
 
+function maybeQueueTownAttacks(actionLabel) {
+  if (!state) return false;
+  if (isAdminProfile(state.profile)) return false;
+  normalizeState(state);
+  if (state.world.pendingEvent) return false;
+  if (state.activeQuest) return false;
+  if (!state.character?.created) return false;
+
+  const nid = state.nodeId || "crossroads";
+  const inHub = nid === "crossroads" || nid === "market" || nid === "gate" || nid === "tavern";
+  if (!inHub) return false;
+
+  const label = String(actionLabel || "");
+  if (/^Accept:/i.test(label)) return false;
+  if (label === "Save") return false;
+
+  const roll = Math.random();
+  // 3 times random events for town attacks: single, group, horde
+  if (roll < 0.008) {
+    // Single monster attacks town/player - Level scales with player, but can be far above
+    const lvl = Math.max(1, Math.floor(state.level || 1));
+    // Single monster can be 10-50 levels above player for challenge, success drops to 5-2%
+    const extraLevels = 10 + Math.floor(Math.random() * 40);
+    const mobLevel = lvl + extraLevels;
+    const tier = Math.min(5, 1 + Math.floor(mobLevel / 140));
+    const idx = (tier - 1) * 60 + 1 + Math.floor(Math.random() * 60);
+    const def = mobDef(idx);
+    const ev = createCombatEvent(state, "town_single", def);
+    ev.encounterKind = "town_single";
+    // Scale to mobLevel
+    for (const e of ev.enemies) {
+      e.recLevel = mobLevel;
+      e.maxHp = Math.floor(e.maxHp * (1 + mobLevel * 0.12));
+      e.hp = e.maxHp;
+      e.atk = Math.floor(e.atk * (1 + mobLevel * 0.08));
+      e.name = `[SINGLE Lv${mobLevel}] ${e.name} attacks town!`;
+    }
+    ev.log = [
+      `⚠️ Town Attack - SINGLE Monster (Lv${mobLevel})!`,
+      `A lone ${ev.enemies[0].name} rushes the town gates.`,
+      `If you are far below Lv${mobLevel}, success rate drops to 5% or 2%!`,
+    ];
+    state.world.pendingEvent = ev;
+    return true;
+  } else if (roll < 0.015) {
+    // Group of 3-4 monsters attacks
+    const lvl = Math.max(1, Math.floor(state.level || 1));
+    const extraLevels = 5 + Math.floor(Math.random() * 30);
+    const mobLevel = lvl + extraLevels;
+    const tier = Math.min(5, 1 + Math.floor(mobLevel / 140));
+    const ev = createCombatEvent(state, "town_group", mobDef((tier-1)*60+10));
+    ev.encounterKind = "town_group";
+    // Add 2-3 extra
+    const extraCount = 2 + Math.floor(Math.random()*2);
+    for (let i=0;i<extraCount;i++) {
+      const idx = (tier - 1) * 60 + 1 + Math.floor(Math.random() * 60);
+      const def = mobDef(idx);
+      const e = { ...def, hp: def.maxHp, maxHp: Math.floor(def.maxHp * (1 + mobLevel*0.12)), atk: Math.floor(def.atk * (1 + mobLevel*0.08)) };
+      e.recLevel = mobLevel;
+      e.name = `[GROUP Lv${mobLevel}] ${e.name}`;
+      e.hp = e.maxHp;
+      ev.enemies.push(e);
+    }
+    for (const e of ev.enemies) {
+      e.recLevel = mobLevel;
+      e.maxHp = Math.floor((e.maxHp || 40) * (1 + mobLevel * 0.12));
+      e.hp = e.maxHp;
+      e.atk = Math.floor((e.atk || 8) * (1 + mobLevel * 0.08));
+      e.name = e.name.includes("Lv") ? e.name : `[GROUP Lv${mobLevel}] ${e.name} attacks!`;
+    }
+    ev.log = [
+      `⚠️ Town Attack - GROUP of ${ev.enemies.length} monsters (Lv${mobLevel})!`,
+      `A pack rushes from the wilds. Town militia calls for help.`,
+      `Far above your level? Success drops to 5-2%!`,
+    ];
+    state.world.pendingEvent = ev;
+    return true;
+  } else if (roll < 0.020) {
+    // Horde attacks town - 6-9 monsters, like mini siege
+    const lvl = Math.max(1, Math.floor(state.level || 1));
+    const extraLevels = Math.floor(Math.random() * 20);
+    const mobLevel = Math.max(60, lvl + extraLevels); // at least 60 as requested for horde
+    const tier = Math.min(5, 1 + Math.floor(mobLevel / 140));
+    const count = 6 + Math.floor(Math.random()*4);
+    const enemies = [];
+    for (let i=0;i<count;i++) {
+      const idx = (tier - 1) * 60 + 1 + Math.floor(Math.random() * 60);
+      const def = mobDef(idx);
+      const e = { ...def, hp: def.maxHp };
+      e.recLevel = mobLevel;
+      e.maxHp = Math.floor((e.maxHp || 40) * (2.0 + mobLevel * 0.10));
+      e.hp = e.maxHp;
+      e.atk = Math.floor((e.atk || 8) * (1.5 + mobLevel * 0.07));
+      e.name = `[HORDE Lv${mobLevel}] ${e.name}`;
+      enemies.push(e);
+    }
+    const ev = {
+      kind: "combat",
+      fromNode: state.nodeId || "crossroads",
+      stage: "combat",
+      encounterKind: "town_horde",
+      log: [
+        `🚨 Town Attack - HORDE of ${count} monsters (Lv${mobLevel})!`,
+        `Horns blare! A horde crashes into town! This is 3rd type of random town attack.`,
+        `If you are far below Lv${mobLevel}, success rate drops to 2%!`,
+      ],
+      enemies,
+      guard: {},
+      defeated: {},
+      didLoot: false,
+      didSearch: false,
+      didReward: false,
+      partyDmgBoost: 0,
+      partyDmgBoostTurns: 0,
+      escapeBoost: 0,
+      escapeBoostTurns: 0,
+      quest: null,
+    };
+    state.world.pendingEvent = ev;
+    return true;
+  }
+  return false;
+}
+
 function maybeQueueHostileEncounter(actionLabel) {
   if (!state) return;
   if (isAdminProfile(state.profile)) return;
@@ -9360,6 +9585,9 @@ function maybeQueueHostileEncounter(actionLabel) {
   const label = String(actionLabel || "");
   if (/^Accept:/i.test(label)) return;
   if (label === "Save") return;
+
+  // First try town attacks (3 types: single, group, horde)
+  if (maybeQueueTownAttacks(actionLabel)) return;
 
   const chance = 0.015;
   if (Math.random() >= chance) return;
