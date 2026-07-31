@@ -1611,6 +1611,7 @@ function handleCrossroadsSiegeDefeat(ev) {
 
   const seed = (hashString(`exile:${state.profile}:${Date.now()}`) >>> 0);
   state.flags["exile:active"] = true;
+  state.flags["exile:ever"] = true;
   state.flags["exile:seed"] = seed;
   state.flags["exile:riskMissionsLeft"] = 5;
   // New town ripple: everything from items down to NPC and missions replaced

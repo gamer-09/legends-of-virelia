@@ -6606,6 +6606,7 @@ function handleCrossroadsSiegeDefeat(ev) {
 
   const seed = (hashString(`exile:${state.profile}:${Date.now()}`) >>> 0);
   state.flags["exile:active"] = true;
+  state.flags["exile:ever"] = true;
   state.flags["exile:seed"] = seed;
   state.flags["exile:riskMissionsLeft"] = 5;
   // New town ripple: everything from items down to NPC and missions replaced
@@ -11457,6 +11458,10 @@ const STORY = {
         { label: "Free Roam (explore)", next: "free_roam_select" },
         { label: "Visit the Tavern (recruit party)", next: "tavern" },
       ];
+      // New town only unlocks if you fail siege - visible only if ever exiled
+      if (s.flags?.["exile:ever"] && !s.flags?.["exile:active"]) {
+        c.push({ label: "Travel to New Town (Exile Town - Only Unlocked Because You Failed Before) - Can Return", next: "exile_town", className: "secondary" });
+      }
       const invStage = s.arcs?.investigation?.stage || 0;
       if (getFlag("messengerUnlocked") && !getFlag("messengerDone")) {
         c.unshift({ label: "Meet the Courier", next: "courier" });
