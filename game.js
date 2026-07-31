@@ -3577,6 +3577,7 @@ let adminShowGame = true;
 let adminSkillProf = "fighter";
 let adminSkillBuild = "balanced";
 let adminSkillPage = 0;
+let adminSkillTier = "all";
 
 function isAdminSessionActive() {
   return !!adminMode && !!state && state.profile === ADMIN_PROFILE;
@@ -4093,15 +4094,30 @@ function renderAdminTools() {
   const updateAdminSkillUi = () => {
     adminSkillProf = String(profSel.value || "fighter").trim();
     adminSkillBuild = String(buildSel.value || "balanced").trim();
-    const maxPage = Math.max(0, Math.ceil(SKILLS_PER_COMBO / SKILLS_PER_PAGE) - 1);
+    adminSkillTier = String(tierSel.value || "all");
+    // Calculate filtered total based on tier
+    let filteredTotal = SKILLS_PER_COMBO;
+    if (adminSkillTier && adminSkillTier !== "all") {
+      const tierNum = parseInt(adminSkillTier, 10);
+      if (!isNaN(tierNum)) {
+        // Count how many match tier
+        filteredTotal = 0;
+        for (let i = 1; i <= SKILLS_PER_COMBO; i++) {
+          const def = skillDefFromParts(adminSkillProf, adminSkillBuild, i);
+          if (def.tier === tierNum) filteredTotal++;
+        }
+      }
+    }
+    const maxPage = Math.max(0, Math.ceil(filteredTotal / SKILLS_PER_PAGE) - 1);
     adminSkillPage = clamp(adminSkillPage, 0, maxPage);
     const start = adminSkillPage * SKILLS_PER_PAGE + 1;
-    const end = Math.min(SKILLS_PER_COMBO, start + SKILLS_PER_PAGE - 1);
+    const end = Math.min(filteredTotal, start + SKILLS_PER_PAGE - 1);
     const p = professionDef(adminSkillProf);
     const b = buildDef(adminSkillBuild);
     const pLabel = p ? p.label : adminSkillProf;
     const bLabel = b ? b.label : adminSkillBuild;
-    skillPageInfo.textContent = `Browsing: ${pLabel} / ${bLabel} — ${start}-${end} of ${SKILLS_PER_COMBO}`;
+    const tierLabelText = adminSkillTier === "all" ? "" : ` Tier ${adminSkillTier}`;
+    skillPageInfo.textContent = `Browsing: ${pLabel} / ${bLabel}${tierLabelText} — ${filteredTotal === 0 ? 0 : start}-${end} of ${filteredTotal}`;
     btnPrevSkillPage.disabled = adminSkillPage <= 0;
     btnNextSkillPage.disabled = adminSkillPage >= maxPage;
   };
@@ -4162,8 +4178,41 @@ function renderAdminTools() {
     renderAdminTools();
   });
 
+  const tierSel = document.createElement("select");
+  tierSel.id = "adminSkillTierSel";
+  tierSel.style.minWidth = "110px";
+  const tierOpts = [
+    { v: "all", t: "All Tiers" },
+    { v: "1", t: "Tier 1" },
+    { v: "2", t: "Tier 2" },
+    { v: "3", t: "Tier 3" },
+    { v: "4", t: "Tier 4" },
+    { v: "5", t: "Tier 5" },
+    { v: "6", t: "Tier 6" },
+    { v: "7", t: "Tier 7" },
+  ];
+  for (const o of tierOpts) {
+    const opt = document.createElement("option");
+    opt.value = o.v;
+    opt.textContent = o.t;
+    tierSel.appendChild(opt);
+  }
+  tierSel.value = String(adminSkillTier || "all");
+  tierSel.addEventListener("change", () => {
+    adminSkillTier = String(tierSel.value || "all");
+    adminSkillPage = 0;
+    renderAdminTools();
+  });
+
+  const tierLabel = document.createElement("div");
+  tierLabel.className = "hint";
+  tierLabel.textContent = "Tier";
+  tierLabel.style.marginLeft = "6px";
+
   skillRowTop.appendChild(profSel);
   skillRowTop.appendChild(buildSel);
+  skillRowTop.appendChild(tierLabel);
+  skillRowTop.appendChild(tierSel);
   skillRowTop.appendChild(btnPrevSkillPage);
   skillRowTop.appendChild(btnNextSkillPage);
   skillRowTop.appendChild(skillPageInfo);
@@ -4183,12 +4232,22 @@ function renderAdminTools() {
   skillList.className = "skillList";
   loaded.skills = loaded.skills || {};
   loaded.skills.learned = loaded.skills.learned || {};
-  const maxPage = Math.max(0, Math.ceil(SKILLS_PER_COMBO / SKILLS_PER_PAGE) - 1);
+  // Build filtered list based on tier
+  let allFiltered = [];
+  for (let j = 1; j <= SKILLS_PER_COMBO; j++) {
+    const d = skillDefFromParts(adminSkillProf, adminSkillBuild, j);
+    if (adminSkillTier && adminSkillTier !== "all") {
+      const tierNum = parseInt(adminSkillTier, 10);
+      if (!isNaN(tierNum) && d.tier !== tierNum) continue;
+    }
+    allFiltered.push(d);
+  }
+  const maxPage = Math.max(0, Math.ceil(allFiltered.length / SKILLS_PER_PAGE) - 1);
   adminSkillPage = clamp(adminSkillPage, 0, maxPage);
-  const start = adminSkillPage * SKILLS_PER_PAGE + 1;
-  const end = Math.min(SKILLS_PER_COMBO, start + SKILLS_PER_PAGE - 1);
-  for (let i = start; i <= end; i++) {
-    const def = skillDefFromParts(adminSkillProf, adminSkillBuild, i);
+  const start = adminSkillPage * SKILLS_PER_PAGE;
+  const end = Math.min(allFiltered.length, start + SKILLS_PER_PAGE);
+  for (let idx = start; idx < end; idx++) {
+    const def = allFiltered[idx];
     const learned = !!loaded.skills.learned[def.key];
 
     const row = document.createElement("div");
@@ -13437,11 +13496,19 @@ function showSkills(msg) {
   const bLabel = b ? b.label : titleCaseWord(buildKey);
 
   const ownedOnly = !!state.skills.ownedOnly;
+  const tierFilter = String(state.skills.tierFilter || "all").trim().toLowerCase();
   const allDefs = [];
   for (let i = 1; i <= SKILLS_PER_COMBO; i++) allDefs.push(skillDefFromParts(profKey, buildKey, i));
-  const filteredDefs = ownedOnly
+  let filteredDefs = ownedOnly
     ? allDefs.filter((d) => !!state.skills.learned[d.key])
     : allDefs;
+  // Tier filter
+  if (tierFilter && tierFilter !== "all") {
+    const tierNum = parseInt(tierFilter, 10);
+    if (!isNaN(tierNum)) {
+      filteredDefs = filteredDefs.filter((d) => Math.floor(d.tier || 1) === tierNum);
+    }
+  }
 
   const total = filteredDefs.length;
   const maxPage = Math.max(0, Math.ceil(total / SKILLS_PER_PAGE) - 1);
@@ -13502,6 +13569,39 @@ function showSkills(msg) {
     showSkills("", { resetScroll: true });
   });
   filterRow.appendChild(btnFilter);
+
+  const tierLabel = document.createElement("div");
+  tierLabel.className = "hint";
+  tierLabel.style.marginLeft = "8px";
+  tierLabel.textContent = "Tier";
+  const tierSel = document.createElement("select");
+  tierSel.style.minWidth = "110px";
+  const tierOpts = [
+    { v: "all", t: "All Tiers" },
+    { v: "1", t: "Tier 1" },
+    { v: "2", t: "Tier 2" },
+    { v: "3", t: "Tier 3" },
+    { v: "4", t: "Tier 4" },
+    { v: "5", t: "Tier 5" },
+    { v: "6", t: "Tier 6" },
+    { v: "7", t: "Tier 7" },
+  ];
+  for (const o of tierOpts) {
+    const opt = document.createElement("option");
+    opt.value = o.v;
+    opt.textContent = o.t;
+    tierSel.appendChild(opt);
+  }
+  tierSel.value = tierFilter;
+  tierSel.addEventListener("change", (e) => {
+    e.preventDefault();
+    state.skills.tierFilter = String(tierSel.value || "all");
+    state.skills.page = 0;
+    autoSave();
+    showSkills("", { resetScroll: true });
+  });
+  filterRow.appendChild(tierLabel);
+  filterRow.appendChild(tierSel);
   outputEl.appendChild(filterRow);
 
   const list = document.createElement("div");

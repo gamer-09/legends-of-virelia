@@ -2623,11 +2623,19 @@ function showSkills(msg) {
   const bLabel = b ? b.label : titleCaseWord(buildKey);
 
   const ownedOnly = !!state.skills.ownedOnly;
+  const tierFilter = String(state.skills.tierFilter || "all").trim().toLowerCase();
   const allDefs = [];
   for (let i = 1; i <= SKILLS_PER_COMBO; i++) allDefs.push(skillDefFromParts(profKey, buildKey, i));
-  const filteredDefs = ownedOnly
+  let filteredDefs = ownedOnly
     ? allDefs.filter((d) => !!state.skills.learned[d.key])
     : allDefs;
+  // Tier filter
+  if (tierFilter && tierFilter !== "all") {
+    const tierNum = parseInt(tierFilter, 10);
+    if (!isNaN(tierNum)) {
+      filteredDefs = filteredDefs.filter((d) => Math.floor(d.tier || 1) === tierNum);
+    }
+  }
 
   const total = filteredDefs.length;
   const maxPage = Math.max(0, Math.ceil(total / SKILLS_PER_PAGE) - 1);
@@ -2688,6 +2696,39 @@ function showSkills(msg) {
     showSkills("", { resetScroll: true });
   });
   filterRow.appendChild(btnFilter);
+
+  const tierLabel = document.createElement("div");
+  tierLabel.className = "hint";
+  tierLabel.style.marginLeft = "8px";
+  tierLabel.textContent = "Tier";
+  const tierSel = document.createElement("select");
+  tierSel.style.minWidth = "110px";
+  const tierOpts = [
+    { v: "all", t: "All Tiers" },
+    { v: "1", t: "Tier 1" },
+    { v: "2", t: "Tier 2" },
+    { v: "3", t: "Tier 3" },
+    { v: "4", t: "Tier 4" },
+    { v: "5", t: "Tier 5" },
+    { v: "6", t: "Tier 6" },
+    { v: "7", t: "Tier 7" },
+  ];
+  for (const o of tierOpts) {
+    const opt = document.createElement("option");
+    opt.value = o.v;
+    opt.textContent = o.t;
+    tierSel.appendChild(opt);
+  }
+  tierSel.value = tierFilter;
+  tierSel.addEventListener("change", (e) => {
+    e.preventDefault();
+    state.skills.tierFilter = String(tierSel.value || "all");
+    state.skills.page = 0;
+    autoSave();
+    showSkills("", { resetScroll: true });
+  });
+  filterRow.appendChild(tierLabel);
+  filterRow.appendChild(tierSel);
   outputEl.appendChild(filterRow);
 
   const list = document.createElement("div");
