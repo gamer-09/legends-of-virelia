@@ -209,35 +209,35 @@ function renderLog() {
   outputEl.scrollTop = outputEl.scrollHeight;
 }
 
-const PLAYER_MAX_LEVEL = 100;
+const PLAYER_MAX_LEVEL = 700;
 const ADMIN_MAX_LEVEL = 999;
 
 function xpToNext(level) {
   const lvl = Math.max(1, Math.floor(level||1));
-  // Admin can go beyond player cap, but with steeper curve
   if (lvl >= ADMIN_MAX_LEVEL) return Infinity;
   if (lvl >= PLAYER_MAX_LEVEL) {
-    // If normal player at cap, no more XP needed unless admin
-    // Check if current state is admin - allow admin to continue, but normal capped
     try {
       if (typeof state !== 'undefined' && state && typeof isAdminProfile === 'function' && !isAdminProfile(state.profile)) {
         return Infinity;
       }
     } catch(e) {}
-    // For admin beyond player cap, use even steeper curve
     if (lvl < ADMIN_MAX_LEVEL) {
-      // Admin curve beyond 100: exponential
-      let base = lvl * 150;
-      base += Math.pow(lvl - 80, 2) * 25;
-      base += Math.pow(Math.max(0, lvl - 100), 2) * 40;
+      // Admin beyond player cap 700-999: very steep
+      let base = lvl * 200;
+      base += Math.pow(lvl - 100, 2) * 15;
+      base += Math.pow(Math.max(0, lvl - 500), 2) * 20;
       return Math.floor(base);
     }
     return Infinity;
   }
+  // Player curve 1..700 - progressive but reachable
   let base = lvl * 100;
-  if (lvl >= 50) base += Math.pow(lvl - 50, 2) * 5;
-  if (lvl >= 80) base += Math.pow(lvl - 80, 2) * 15;
-  if (lvl >= 90) base += Math.pow(lvl - 90, 2) * 30;
+  if (lvl >= 50) base += Math.pow(lvl - 50, 2) * 4;
+  if (lvl >= 100) base += Math.pow(lvl - 100, 2) * 3;
+  if (lvl >= 200) base += Math.pow(lvl - 200, 2) * 4;
+  if (lvl >= 350) base += Math.pow(lvl - 350, 2) * 6;
+  if (lvl >= 500) base += Math.pow(lvl - 500, 2) * 8;
+  if (lvl >= 600) base += Math.pow(lvl - 600, 2) * 12;
   return Math.floor(base);
 }
 

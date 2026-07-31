@@ -5139,35 +5139,35 @@ function renderLog() {
   outputEl.scrollTop = outputEl.scrollHeight;
 }
 
-const PLAYER_MAX_LEVEL = 100;
+const PLAYER_MAX_LEVEL = 700;
 const ADMIN_MAX_LEVEL = 999;
 
 function xpToNext(level) {
   const lvl = Math.max(1, Math.floor(level||1));
-  // Admin can go beyond player cap, but with steeper curve
   if (lvl >= ADMIN_MAX_LEVEL) return Infinity;
   if (lvl >= PLAYER_MAX_LEVEL) {
-    // If normal player at cap, no more XP needed unless admin
-    // Check if current state is admin - allow admin to continue, but normal capped
     try {
       if (typeof state !== 'undefined' && state && typeof isAdminProfile === 'function' && !isAdminProfile(state.profile)) {
         return Infinity;
       }
     } catch(e) {}
-    // For admin beyond player cap, use even steeper curve
     if (lvl < ADMIN_MAX_LEVEL) {
-      // Admin curve beyond 100: exponential
-      let base = lvl * 150;
-      base += Math.pow(lvl - 80, 2) * 25;
-      base += Math.pow(Math.max(0, lvl - 100), 2) * 40;
+      // Admin beyond player cap 700-999: very steep
+      let base = lvl * 200;
+      base += Math.pow(lvl - 100, 2) * 15;
+      base += Math.pow(Math.max(0, lvl - 500), 2) * 20;
       return Math.floor(base);
     }
     return Infinity;
   }
+  // Player curve 1..700 - progressive but reachable
   let base = lvl * 100;
-  if (lvl >= 50) base += Math.pow(lvl - 50, 2) * 5;
-  if (lvl >= 80) base += Math.pow(lvl - 80, 2) * 15;
-  if (lvl >= 90) base += Math.pow(lvl - 90, 2) * 30;
+  if (lvl >= 50) base += Math.pow(lvl - 50, 2) * 4;
+  if (lvl >= 100) base += Math.pow(lvl - 100, 2) * 3;
+  if (lvl >= 200) base += Math.pow(lvl - 200, 2) * 4;
+  if (lvl >= 350) base += Math.pow(lvl - 350, 2) * 6;
+  if (lvl >= 500) base += Math.pow(lvl - 500, 2) * 8;
+  if (lvl >= 600) base += Math.pow(lvl - 600, 2) * 12;
   return Math.floor(base);
 }
 
@@ -8240,24 +8240,20 @@ function genMissions(count) {
     const diff = pickDifficultyByIndex(i);
     const d = DIFFICULTY[diff];
     const faction = FACTIONS[(i + 1) % FACTIONS.length];
-    // Remodule: quest recLevel now scales to PLAYER_MAX_LEVEL (100) not admin 999
-    // Old: d.recLevel + floor(i/10) max ~75
-    // New: progressive scaling to reach 100 at high end, with difficulty weighting
+    // Remodule: quest recLevel now scales to PLAYER_MAX_LEVEL (700) - player cap 700, admin 999
     const progress = i / Math.max(1, count - 1); // 0..1
-    // Difficulty adds offset, plus progressive
-    // Easy quests stay low 1..40, Legendary reach up to 100
     let levelScale = 0;
-    if (diff === "easy") levelScale = Math.floor(progress * 35); // 1..36
-    else if (diff === "normal") levelScale = Math.floor(progress * 55); // 4..59
-    else if (diff === "hard") levelScale = Math.floor(progress * 70); // 8..78
-    else if (diff === "elite") levelScale = Math.floor(progress * 85); // 12..97
-    else levelScale = Math.floor(progress * 90); // legendary 16..106 clamped to 100
+    if (diff === "easy") levelScale = Math.floor(progress * 200); // 1..201
+    else if (diff === "normal") levelScale = Math.floor(progress * 320); // 4..324
+    else if (diff === "hard") levelScale = Math.floor(progress * 480); // 8..488
+    else if (diff === "elite") levelScale = Math.floor(progress * 620); // 12..632
+    else levelScale = Math.floor(progress * 684); // legendary 16..700
     let recLevel = d.recLevel + levelScale;
-    recLevel = Math.max(1, Math.min(100, recLevel));
-    // XP and gold scaled slightly higher for high level quests to help reach cap
-    const tierMult = 1 + (recLevel / 100) * 0.8;
+    recLevel = Math.max(1, Math.min(700, recLevel));
+    // XP scaled higher for high level quests to help reach 700 cap
+    const tierMult = 1 + (recLevel / 700) * 2.5;
     const xp = Math.max(1, Math.floor(((d.baseXp || 0) + recLevel * (d.xpPerLevel || 0)) * tierMult));
-    const gold = Math.max(0, Math.floor(((d.baseGold || 0) + recLevel * (d.goldPerLevel || 0)) * (1 + recLevel * 0.02)));
+    const gold = Math.max(0, Math.floor(((d.baseGold || 0) + recLevel * (d.goldPerLevel || 0)) * (1 + recLevel * 0.03)));
     missions.push({
       id: `m${i + 1}`,
       kind: "mission",
@@ -8280,9 +8276,9 @@ function genSideQuests(count) {
   const exileA = ["Ash", "Lantern", "Moon", "Cinder", "Iron", "Glass", "Fog", "Shadow", "Salt", "Storm", "Dawn", "Grave", "Gutter", "Hollow", "Bitter", "Black", "White", "Copper", "Sable", "Bright"];
   const exileB = ["Gate", "Row", "Spur", "Crossing", "Stairs", "Arcade", "Spire", "Canal", "Cistern", "Shrine", "Bridge", "Vault", "Yard", "Lane", "Court", "Bazaar", "Foundry", "Chapel", "Wharf", "Keep"];
   for (let i = 0; i < count; i++) {
-    // Remodule: side quest minLevel scales to PLAYER_MAX 100
+    // Remodule: side quest minLevel scales to PLAYER_MAX 700 - player cap 700
     const progress = i / Math.max(1, count - 1);
-    const minLevel = Math.max(1, Math.min(100, 1 + Math.floor(progress * 99)));
+    const minLevel = Math.max(1, Math.min(700, 1 + Math.floor(progress * 699)));
     const faction = FACTIONS[(i + 2) % FACTIONS.length];
     let place = places[i % places.length];
     if (seed) {
@@ -8290,9 +8286,9 @@ function genSideQuests(count) {
       const hb = (hashString(`town:${seed}:place:${i}:b`) >>> 0);
       place = `${exileA[ha % exileA.length]} ${exileB[hb % exileB.length]}`;
     }
-    // XP scales better for high level side quests to help reach cap
-    const xp = Math.max(18, Math.floor((18 + i * 1.7) * (1 + minLevel * 0.03)));
-    const gold = Math.max(6, Math.floor((6 + i * 0.6) * (1 + minLevel * 0.02)));
+    // XP scales better for high level side quests to help reach 700 cap
+    const xp = Math.max(18, Math.floor((18 + i * 1.7) * (1 + minLevel * 0.05)));
+    const gold = Math.max(6, Math.floor((6 + i * 0.6) * (1 + minLevel * 0.04)));
     quests.push({
       id: `s${i + 1}`,
       kind: "side",
