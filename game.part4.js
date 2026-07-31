@@ -860,7 +860,16 @@ function canTakeQuest(q) {
   if (q.kind === "mission") {
     const rep = (state.reputation && state.reputation[q.faction]) ? state.reputation[q.faction] : 0;
     if (q.faction !== "Wilds" && rep < -2) return { ok: false, reason: `Your standing with the ${q.faction} is too low.` };
-    if (state.level + 4 < q.recLevel) return { ok: false, reason: `Too dangerous. ${difficultyGateText(q.recLevel, q.difficulty)}` };
+    // Remodule: missions as hard as level suggests - strict gate, no level 5 doing legendary/hard/normal
+    // Easy allows 2 below, Normal requires exact, Hard requires exact, Elite requires +1, Legendary +2 (must be at or above rec)
+    const diff = String(q.difficulty || "normal").toLowerCase();
+    let minRequired = q.recLevel;
+    if (diff === "easy") minRequired = q.recLevel - 2;
+    else if (diff === "normal") minRequired = q.recLevel;
+    else if (diff === "hard") minRequired = q.recLevel;
+    else if (diff === "elite") minRequired = q.recLevel + 1;
+    else if (diff === "legendary") minRequired = q.recLevel + 2;
+    if (state.level < minRequired) return { ok: false, reason: `Too dangerous. Requires Level ${minRequired}. ${difficultyGateText(q.recLevel, q.difficulty)} You are Level ${state.level}.` };
     const reqParty = missionPartyRequirement(q);
     if (partySize(state) < reqParty) return { ok: false, reason: `Requires party size ${reqParty}. Visit the Tavern.` };
     return { ok: true };
@@ -945,26 +954,51 @@ function missionSuccessChance(q, approach) {
   const rep = (state.reputation && state.reputation[q.faction]) ? state.reputation[q.faction] : 0;
   const levelEdge = state.level - q.recLevel;
   const repEdge = rep * 0.03;
-  const base = 0.55;
-  let chance = base + levelEdge * 0.05 + repEdge;
+  // Remodule: missions as hard as level suggests - stricter success chance
+  // Old allowed 15% even if 20+ levels below. New scales harsher for high diff
+  const diff = String(q.difficulty || "normal").toLowerCase();
+  let diffPenalty = 0;
+  if (diff === "hard") diffPenalty = -0.08;
+  else if (diff === "elite") diffPenalty = -0.15;
+  else if (diff === "legendary") diffPenalty = -0.25;
+  const base = 0.55 + diffPenalty;
+  // Level edge more punishing: each level below -7% instead of +5%, each above +3%
+  let levelBonus = 0;
+  if (levelEdge >= 0) levelBonus = levelEdge * 0.03;
+  else levelBonus = levelEdge * 0.07; // negative edge hurts more
+  let chance = base + levelBonus + repEdge;
   if (getFlag("heardRumors")) chance += 0.03;
   if (approach === "scout") chance += 0.08;
   if (approach === "negotiate") chance += clamp(rep * 0.02, -0.08, 0.10);
-  if (approach === "charge") chance -= 0.06;
+  if (approach === "charge") chance -= 0.08;
   if (
     state
     && !isAdminProfile(state.profile)
     && !!state.flags?.["exile:active"]
     && Math.max(0, Math.floor(state.flags?.["exile:riskMissionsLeft"] || 0)) > 0
   ) {
-    chance -= 0.10;
+    chance -= 0.12;
   }
-  return clamp(chance, 0.15, 0.92);
+  // Clamp min lower for hard difficulties - legendary at 20 below should be near impossible
+  let minChance = 0.02;
+  if (diff === "easy") minChance = 0.10;
+  else if (diff === "normal") minChance = 0.06;
+  else if (diff === "hard") minChance = 0.03;
+  else if (diff === "elite") minChance = 0.02;
+  else if (diff === "legendary") minChance = 0.01;
+  return clamp(chance, minChance, 0.90);
 }
 
 function missionTierFromRecLevel(recLevel) {
   const lvl = Math.max(1, Math.floor(recLevel || 1));
-  return clamp(1 + Math.floor((lvl - 1) / 4), 1, 5);
+  // Remodule for 700 cap: tier progression slower, matches quest recLevel scaling
+  // Old: 1+ floor((lvl-1)/4) => tier5 at 17
+  // New: tier1 1-99, tier2 100-249, tier3 250-399, tier4 400-549, tier5 550+
+  if (lvl < 100) return clamp(1 + Math.floor((lvl - 1) / 50), 1, 5);
+  if (lvl < 250) return clamp(2 + Math.floor((lvl - 100) / 75), 1, 5);
+  if (lvl < 400) return clamp(3 + Math.floor((lvl - 250) / 75), 1, 5);
+  if (lvl < 550) return clamp(4 + Math.floor((lvl - 400) / 75), 1, 5);
+  return 5;
 }
 
 function missionTierForQuest(q) {
@@ -993,21 +1027,38 @@ function pickMissionMobForQuest(s, q) {
 function tuneMissionCombatEvent(ev, q) {
   if (!ev || !q) return;
   const dt = tierForDifficultyKey(q.difficulty);
-  const hpMul = dt <= 1 ? 0.95 : (dt === 2 ? 1.00 : (dt === 3 ? 1.18 : (dt === 4 ? 1.38 : 1.65)));
-  const atkMul = dt <= 1 ? 0.96 : (dt === 2 ? 1.00 : (dt === 3 ? 1.14 : (dt === 4 ? 1.30 : 1.50)));
-  const accAdd = dt <= 1 ? -0.01 : (dt === 2 ? 0.00 : (dt === 3 ? 0.02 : (dt === 4 ? 0.04 : 0.06)));
+  // Base difficulty multipliers - scaled up for 700 cap, legendary much harder
+  const hpMulBase = dt <= 1 ? 0.95 : (dt === 2 ? 1.05 : (dt === 3 ? 1.35 : (dt === 4 ? 1.75 : 2.40)));
+  const atkMulBase = dt <= 1 ? 0.96 : (dt === 2 ? 1.05 : (dt === 3 ? 1.30 : (dt === 4 ? 1.65 : 2.10)));
+  const accAddBase = dt <= 1 ? -0.01 : (dt === 2 ? 0.01 : (dt === 3 ? 0.04 : (dt === 4 ? 0.07 : 0.10)));
+  // Level difference scaling: if recLevel > player level, enemies become even harder (as hard as level suggests)
+  const lvl = Math.max(1, Math.floor(state?.level || 1));
+  const rec = Math.max(1, Math.floor(q.recLevel || 1));
+  const diff = Math.max(0, rec - lvl);
+  // For each level difference, increase HP 4%, Atk 3%, Acc 0.3%
+  const lvlHpMul = 1 + diff * 0.04;
+  const lvlAtkMul = 1 + diff * 0.03;
+  const lvlAccAdd = diff * 0.003;
+  const hpMul = hpMulBase * lvlHpMul;
+  const atkMul = atkMulBase * lvlAtkMul;
+  const accAdd = accAddBase + lvlAccAdd;
   for (const e of ev.enemies || []) {
     if (!e) continue;
     if (typeof e.maxHp === "number") e.maxHp = Math.max(1, Math.round(e.maxHp * hpMul));
     if (typeof e.hp === "number" && typeof e.maxHp === "number") e.hp = Math.min(e.maxHp, Math.round(e.hp * hpMul));
     if (typeof e.atk === "number") e.atk = Math.max(1, Math.round(e.atk * atkMul));
-    if (typeof e.acc === "number") e.acc = clamp(e.acc + accAdd, 0.50, 0.94);
+    if (typeof e.acc === "number") e.acc = clamp(e.acc + accAdd, 0.45, 0.96);
   }
 }
 
 function sideTierFromMinLevel(minLevel) {
   const lvl = Math.max(1, Math.floor(minLevel || 1));
-  return clamp(1 + Math.floor((lvl - 1) / 4), 1, 5);
+  // Remodule for 700 cap
+  if (lvl < 100) return clamp(1 + Math.floor((lvl - 1) / 50), 1, 5);
+  if (lvl < 250) return clamp(2 + Math.floor((lvl - 100) / 75), 1, 5);
+  if (lvl < 400) return clamp(3 + Math.floor((lvl - 250) / 75), 1, 5);
+  if (lvl < 550) return clamp(4 + Math.floor((lvl - 400) / 75), 1, 5);
+  return 5;
 }
 
 function sideTierForQuest(s, q, approach) {
@@ -1037,15 +1088,25 @@ function pickSideMobForQuest(s, q, approach) {
 function tuneSideCombatEvent(ev, q, approach) {
   if (!ev || !q) return;
   const dt = sideTierForQuest(state, q, approach);
-  const hpMul = dt <= 1 ? 0.96 : (dt === 2 ? 1.00 : (dt === 3 ? 1.10 : (dt === 4 ? 1.22 : 1.35)));
-  const atkMul = dt <= 1 ? 0.97 : (dt === 2 ? 1.00 : (dt === 3 ? 1.08 : (dt === 4 ? 1.18 : 1.28)));
-  const accAdd = dt <= 1 ? -0.01 : (dt === 2 ? 0.00 : (dt === 3 ? 0.015 : (dt === 4 ? 0.03 : 0.045)));
+  const hpMulBase = dt <= 1 ? 0.96 : (dt === 2 ? 1.08 : (dt === 3 ? 1.30 : (dt === 4 ? 1.60 : 2.00)));
+  const atkMulBase = dt <= 1 ? 0.97 : (dt === 2 ? 1.05 : (dt === 3 ? 1.20 : (dt === 4 ? 1.45 : 1.85)));
+  const accAddBase = dt <= 1 ? -0.01 : (dt === 2 ? 0.01 : (dt === 3 ? 0.03 : (dt === 4 ? 0.06 : 0.09)));
+  // Side quests as hard as level suggests: if minLevel > player level, scale up
+  const lvl = Math.max(1, Math.floor(state?.level || 1));
+  const rec = Math.max(1, Math.floor(q.minLevel || 1));
+  const diff = Math.max(0, rec - lvl);
+  const lvlHpMul = 1 + diff * 0.035;
+  const lvlAtkMul = 1 + diff * 0.025;
+  const lvlAccAdd = diff * 0.0025;
+  const hpMul = hpMulBase * lvlHpMul;
+  const atkMul = atkMulBase * lvlAtkMul;
+  const accAdd = accAddBase + lvlAccAdd;
   for (const e of ev.enemies || []) {
     if (!e) continue;
     if (typeof e.maxHp === "number") e.maxHp = Math.max(1, Math.round(e.maxHp * hpMul));
     if (typeof e.hp === "number" && typeof e.maxHp === "number") e.hp = Math.min(e.maxHp, Math.round(e.hp * hpMul));
     if (typeof e.atk === "number") e.atk = Math.max(1, Math.round(e.atk * atkMul));
-    if (typeof e.acc === "number") e.acc = clamp(e.acc + accAdd, 0.50, 0.94);
+    if (typeof e.acc === "number") e.acc = clamp(e.acc + accAdd, 0.45, 0.96);
   }
 }
 

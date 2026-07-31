@@ -391,16 +391,16 @@ try {
 
 /* 6. FREE ROAM MAP */
 const V2_AREAS = {
-  streets: { label:'Low Streets', danger:1, cost:{}, connects:['docks','market','gate','ruins'], desc:'Crowded, watchful. Rumors.' },
-  docks: { label:'Dock Warrens', danger:2, cost:{ waterskin:1 }, connects:['streets','marsh','market'], desc:'Salt, knives. Smugglers offer mushroom.' },
-  market: { label:'High Market', danger:0, cost:{}, connects:['streets','docks','gate','crossroads'], desc:'Safe-ish. Korg forge.' },
-  gate: { label:'Virelia Gate', danger:1, cost:{ waterskin:1 }, connects:['streets','road','market'], desc:'Leaving costs water. Guards if watchHeat>30.' },
-  road: { label:'Open Road', danger:2, cost:{ ration:1, waterskin:1 }, connects:['gate','ruins','marsh'], desc:'Ambush chance danger+risk+watchHeat.' },
-  ruins: { label:'Old Ruins', danger:3, cost:{ torch:1, ration:1 }, connects:['road','streets','vault'], desc:'Needs torch else -20% accuracy. Hollow child.' },
-  marsh: { label:'Fog Marsh', danger:3, cost:{ ration:1, waterskin:1 }, connects:['road','docks','wilds'], desc:'High wilds. Forage herbs poison risk 15%.' },
-  vault: { label:'Sun Vault Approach', danger:4, cost:{ torch:1, waterskin:1 }, connects:['ruins'], desc:'Shard may be found. Looking flags you.' },
-  wilds: { label:'Deep Wilds', danger:5, cost:{ ration:2, waterskin:2, torch:1 }, connects:['marsh'], desc:'Most dangerous. Rare loot. Wilds+1 if camp no ritual.' },
-  crossroads: { label:'Crossroads', danger:0, cost:{}, connects:['market','streets','road'], desc:'Hub. Mara judges.' }
+  streets: { label:'Low Streets', danger:1, minLevel:1, cost:{}, connects:['docks','market','gate','ruins'], desc:'Crowded, watchful. Rumors. Level 1+' },
+  docks: { label:'Dock Warrens', danger:2, minLevel:15, cost:{ waterskin:1 }, connects:['streets','marsh','market'], desc:'Salt, knives. Level 15+ recommended.' },
+  market: { label:'High Market', danger:0, minLevel:1, cost:{}, connects:['streets','docks','gate','crossroads'], desc:'Safe-ish. Korg forge. Level 1+' },
+  gate: { label:'Virelia Gate', danger:1, minLevel:10, cost:{ waterskin:1 }, connects:['streets','road','market'], desc:'Leaving costs water. Level 10+ recommended.' },
+  road: { label:'Open Road', danger:2, minLevel:40, cost:{ ration:1, waterskin:1 }, connects:['gate','ruins','marsh'], desc:'Ambush chance. Level 40+ recommended.' },
+  ruins: { label:'Old Ruins', danger:3, minLevel:80, cost:{ torch:1, ration:1 }, connects:['road','streets','vault'], desc:'Needs torch else -20% accuracy. Hollow child. Level 80+ (Hard).' },
+  marsh: { label:'Fog Marsh', danger:3, minLevel:120, cost:{ ration:1, waterskin:1 }, connects:['road','docks','wilds'], desc:'High wilds. Level 120+ (Hard+).' },
+  vault: { label:'Sun Vault Approach', danger:4, minLevel:250, cost:{ torch:1, waterskin:1 }, connects:['ruins'], desc:'Shard may be found. Level 250+ (Elite).' },
+  wilds: { label:'Deep Wilds', danger:5, minLevel:400, cost:{ ration:2, waterskin:2, torch:1 }, connects:['marsh'], desc:'Most dangerous. Level 400+ (Legendary). Wilds+1 if camp no ritual.' },
+  crossroads: { label:'Crossroads', danger:0, minLevel:1, cost:{}, connects:['market','streets','road'], desc:'Hub. Level 1+' }
 };
 
 function ensureV2Roam(s) {
@@ -683,6 +683,17 @@ function injectV2StoryNodes() {
         next: 'free_roam',
         effect: (function(targetKey, targetArea){
           return function() {
+            // Level gate: as hard as level suggests - block low level from high danger area
+            const reqLevel = targetArea.minLevel || 1;
+            const playerLvl = Math.max(1, Math.floor(s.level || 1));
+            if (playerLvl < reqLevel && !(typeof isAdminProfile === 'function' && isAdminProfile(s.profile))) {
+              appendLog(`Too dangerous! ${targetArea.label} requires Level ${reqLevel}. You are Level ${playerLvl}. Train, get party, or do lower quests.`);
+              // Apply fear debuff for attempting too hard area
+              if (typeof addEffect === 'function' && Math.random() < 0.6) {
+                addEffect("fear", 12000);
+              }
+              return;
+            }
             const cost = targetArea.cost || {};
             for (const k in cost) {
               if ((s.inventory && s.inventory[k] || 0) < cost[k]) { appendLog('Need: ' + k + 'x' + cost[k]); return; }
@@ -690,7 +701,7 @@ function injectV2StoryNodes() {
             for (const k in cost) { if (cost[k]>0) consumeInvItem(s,k,cost[k]); }
             v2.current = targetKey;
             v2.visited[targetKey]=true;
-            appendLog('Traveled to ' + targetArea.label);
+            appendLog('Traveled to ' + targetArea.label + ` (Level ${reqLevel}+)`);
             const ws = ConsequenceEngine.worldState(s);
             if (ws.watchHeat > 40 && Math.random()<0.2) {
               appendLog('Guards stop you. Pay 5g or lose Crown rep.');

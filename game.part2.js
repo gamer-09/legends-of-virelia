@@ -1262,11 +1262,11 @@ function grantStarterSkillKitIfNeeded(s) {
 }
 
 const DIFFICULTY = {
-  easy: { label: "Easy", className: "easy", recLevel: 1, baseXp: 35, baseGold: 10, xpPerLevel: 22, goldPerLevel: 4, baseDmg: 6 },
-  normal: { label: "Normal", className: "normal", recLevel: 4, baseXp: 70, baseGold: 20, xpPerLevel: 35, goldPerLevel: 7, baseDmg: 10 },
-  hard: { label: "Hard", className: "hard", recLevel: 8, baseXp: 120, baseGold: 32, xpPerLevel: 55, goldPerLevel: 12, baseDmg: 16 },
-  elite: { label: "Elite", className: "elite", recLevel: 12, baseXp: 180, baseGold: 48, xpPerLevel: 80, goldPerLevel: 18, baseDmg: 24 },
-  legendary: { label: "Legendary", className: "legendary", recLevel: 16, baseXp: 260, baseGold: 70, xpPerLevel: 115, goldPerLevel: 28, baseDmg: 36 },
+  easy: { label: "Easy", className: "easy", recLevel: 1, baseXp: 40, baseGold: 12, xpPerLevel: 28, goldPerLevel: 5, baseDmg: 8 },
+  normal: { label: "Normal", className: "normal", recLevel: 25, baseXp: 90, baseGold: 28, xpPerLevel: 48, goldPerLevel: 10, baseDmg: 16 },
+  hard: { label: "Hard", className: "hard", recLevel: 70, baseXp: 160, baseGold: 50, xpPerLevel: 75, goldPerLevel: 16, baseDmg: 26 },
+  elite: { label: "Elite", className: "elite", recLevel: 150, baseXp: 260, baseGold: 80, xpPerLevel: 110, goldPerLevel: 24, baseDmg: 38 },
+  legendary: { label: "Legendary", className: "legendary", recLevel: 300, baseXp: 400, baseGold: 130, xpPerLevel: 160, goldPerLevel: 36, baseDmg: 56 },
 };
 
 const FACTIONS = ["Guild", "Rebels", "Crown", "Wilds"];
