@@ -1613,11 +1613,28 @@ function handleCrossroadsSiegeDefeat(ev) {
   state.flags["exile:active"] = true;
   state.flags["exile:seed"] = seed;
   state.flags["exile:riskMissionsLeft"] = 5;
-
+  // New town ripple: everything from items down to NPC and missions replaced
   state.completed = { missions: {}, side: {} };
   if (typeof genMissions === "function") state.missions = genMissions(MISSION_COUNT, seed);
   if (typeof genSideQuests === "function") state.sideQuests = genSideQuests(SIDE_QUEST_COUNT, seed);
   if (typeof marketStockCache !== "undefined") marketStockCache = null;
+  // Reset NPCs and recruits for new town - everything new
+  if (state.flags) {
+    state.flags.npcAttitudes = {};
+    state.flags.consequenceLog = [];
+    state.flags.shopPriceMod = 1;
+    state.flags.messengerUnlocked = false;
+    state.flags.messengerDone = false;
+  }
+  if (state.party) {
+    state.party.recruits = [];
+    state.party.recruitsDay = 0;
+  }
+  // Clear destination found flags so new town has new discoveries
+  if (state.flags) {
+    const keysToDelete = Object.keys(state.flags).filter(k => k.startsWith("found_dest_") || k.startsWith("found_"));
+    for (const k of keysToDelete) delete state.flags[k];
+  }
 
   const maxHp = playerMaxHp();
   const maxMana = playerMaxMana();

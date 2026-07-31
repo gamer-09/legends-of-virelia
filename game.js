@@ -6608,11 +6608,28 @@ function handleCrossroadsSiegeDefeat(ev) {
   state.flags["exile:active"] = true;
   state.flags["exile:seed"] = seed;
   state.flags["exile:riskMissionsLeft"] = 5;
-
+  // New town ripple: everything from items down to NPC and missions replaced
   state.completed = { missions: {}, side: {} };
   if (typeof genMissions === "function") state.missions = genMissions(MISSION_COUNT, seed);
   if (typeof genSideQuests === "function") state.sideQuests = genSideQuests(SIDE_QUEST_COUNT, seed);
   if (typeof marketStockCache !== "undefined") marketStockCache = null;
+  // Reset NPCs and recruits for new town - everything new
+  if (state.flags) {
+    state.flags.npcAttitudes = {};
+    state.flags.consequenceLog = [];
+    state.flags.shopPriceMod = 1;
+    state.flags.messengerUnlocked = false;
+    state.flags.messengerDone = false;
+  }
+  if (state.party) {
+    state.party.recruits = [];
+    state.party.recruitsDay = 0;
+  }
+  // Clear destination found flags so new town has new discoveries
+  if (state.flags) {
+    const keysToDelete = Object.keys(state.flags).filter(k => k.startsWith("found_dest_") || k.startsWith("found_"));
+    for (const k of keysToDelete) delete state.flags[k];
+  }
 
   const maxHp = playerMaxHp();
   const maxMana = playerMaxMana();
@@ -8079,17 +8096,46 @@ function tickEffects() {
   const t = nowMs();
 
   const bleed = state.effects.bleeding;
-  if (bleed && typeof bleed.expiresAt === "number" && bleed.expiresAt > t) {
-    if (typeof bleed.nextTickAt !== "number") bleed.nextTickAt = t + 5000;
-    if (t >= bleed.nextTickAt) {
-      const missed = Math.min(3, Math.floor((t - bleed.nextTickAt) / 5000) + 1);
-      bleed.nextTickAt = bleed.nextTickAt + missed * 5000;
-      const dealt = applyDamage(missed, { fromEffect: true }) || 0;
-      playEffectSfx("bleeding", "tick");
-      appendLog(`🩸 Bleeding hurts you (-${dealt} HP) - use Bandage or Healer to cure.`);
-      renderStats(); renderLog(); autoSave();
-      if (typeof maybeApplyDebuffFromSituation === 'function' && Math.random() < 0.25) {
-        try { maybeApplyDebuffFromSituation(state, "bleeding_long"); } catch(e) {}
+  // Special case: old town hostile permanent bleeding that keeps you at 1 HP until you leave
+  const isOldTownHostile = !!(state && (state.nodeId === "old_town_hostile"));
+  if (bleed) {
+    const isPermBleed = !!bleed.permanent;
+    const isActive = (typeof bleed.expiresAt === "number" && bleed.expiresAt > t) || isPermBleed || typeof bleed.pausedRemaining === 'number';
+    if (isActive) {
+      if (typeof bleed.nextTickAt !== "number") bleed.nextTickAt = t + 5000;
+      if (t >= bleed.nextTickAt) {
+        const missed = Math.min(3, Math.floor((t - bleed.nextTickAt) / 5000) + 1);
+        bleed.nextTickAt = bleed.nextTickAt + missed * 5000;
+        if (isOldTownHostile && isPermBleed) {
+          // In old town hostile, bleeding is permanent and caps at 1 HP - if HP goes above 1, reduce to 1
+          if ((state.hp || 0) > 1) {
+            const over = (state.hp || 0) - 1;
+            state.hp = 1;
+            appendLog(`🩸 Old Town Hostile: Permanent bleeding keeps you at 1 HP! (-${over} HP) - Leave town to stop, healing blocked until you leave.`);
+            playEffectSfx("bleeding", "tick");
+            renderStats(); renderLog(); autoSave();
+          } else {
+            // Already at 1 HP, still show tick but no further damage below 1
+            appendLog(`🩸 Old Town Hostile: Bleeding holds you at 1 HP - cannot heal here. Pay 2M fine or flee!`);
+            playEffectSfx("bleeding", "tick");
+            renderStats(); renderLog(); autoSave();
+          }
+        } else {
+          const dealt = applyDamage(missed, { fromEffect: true }) || 0;
+          playEffectSfx("bleeding", "tick");
+          appendLog(`🩸 Bleeding hurts you (-${dealt} HP) - use Bandage or Healer to cure.`);
+          renderStats(); renderLog(); autoSave();
+          if (typeof maybeApplyDebuffFromSituation === 'function' && Math.random() < 0.25) {
+            try { maybeApplyDebuffFromSituation(state, "bleeding_long"); } catch(e) {}
+          }
+        }
+      }
+      // Extra check: if in old town hostile and HP >1 due to healing, force back to 1 immediately (not just on tick)
+      if (isOldTownHostile && isPermBleed && (state.hp || 0) > 1) {
+        const over = (state.hp || 0) - 1;
+        state.hp = 1;
+        appendLog(`🩸 Old Town: Healing blocked! Bleeding reduces you back to 1 HP (-${over}). Leave town to heal.`);
+        renderStats(); renderLog(); autoSave();
       }
     }
   }
@@ -11463,73 +11509,138 @@ const STORY = {
 
   old_town_hostile: {
     text: (s) => {
-      return `You step back into Old Town - Crossroads. The moment they see you, whispers turn to shouts.\n"Traitor! You failed the siege! You let the horde in!"\n\nGuards draw blades, merchants slam shutters, former allies glare. Everyone attacks you on sight.\nYour old reputation is shattered. You feel blades graze you - bleeding starts.\n\nA town crier shouts: "Pay 2,000,000 gold to be forgiven, or leave forever!"\nGold: ${s.gold}\nEffects: ${(s.effects ? Object.keys(s.effects).join(", ") : "None")}`;
+      // When you enter old town, you are beaten to near death as requested: set HP to 1 and bleeding permanent that caps at 1 HP
+      // This text is shown before effect, but effect will be applied in choices or on entry via enterNode? We'll apply via effect in text function for immediate
+      try {
+        if (!s.flags["old_town_hostile_entered"]) {
+          s.flags["old_town_hostile_entered"] = true;
+          // Beat to near death: set HP to 1
+          const maxHp = (typeof playerMaxHp === 'function' ? playerMaxHp() : (s.maxHp || 100));
+          if ((s.hp || 0) > 1) {
+            const dmg = (s.hp || 0) - 1;
+            s.hp = 1;
+            // Log will be shown via appendLog in choices, but we set here
+          }
+          // Apply permanent bleeding that stops at 1 HP and prevents healing
+          s.effects = s.effects || {};
+          s.effects["bleeding"] = { key: "bleeding", permanent: true, appliedAt: Date.now(), isOldTownHostileBleed: true, oldTownBleed: true };
+          // Also add weak and fear as part of beating
+          s.effects["weak"] = s.effects["weak"] || { key: "weak", permanent: false, expiresAt: Date.now()+20000, appliedAt: Date.now() };
+          s.effects["fear"] = s.effects["fear"] || { key: "fear", permanent: false, expiresAt: Date.now()+15000, appliedAt: Date.now() };
+        }
+      } catch(e) {}
+      return `You step back into Old Town - Crossroads. The moment they see you, whispers turn to shouts.\n"Traitor! You failed the siege! You let the horde in!"\n\nGuards draw blades, merchants slam shutters, former allies glare. Everyone attacks you on sight.\n\nYou are BEATEN TO NEAR DEATH! Guards beat you until you have 1 HP left.\nA permanent bleeding curse is applied: it keeps you at 1 HP - if you heal above 1, it reduces you back to 1.\nHealing is IMPOSSIBLE while you stay in Old Town. Leave town to stop bleeding and heal.\n\nA town crier shouts: "Pay 2,000,000 gold fine to be forgiven, or leave forever!"\nGold: ${s.gold} (Need 2,000,000)\nHP: ${s.hp}/${typeof playerMaxHp === 'function' ? playerMaxHp() : s.maxHp}\nEffects: ${(s.effects ? Object.keys(s.effects).join(", ") : "None")}`;
     },
     choices: (s) => {
       return [
         {
-          label: "Pay 2,000,000 Gold to be Forgiven and Return",
+          label: "Pay Fine: 2,000,000 Gold to be Forgiven",
           next: "crossroads",
           disabled: (s.gold || 0) < 2000000,
           effect: () => {
             if ((s.gold || 0) < 2000000) {
-              appendLog("Not enough gold. You need 2,000,000 gold coins!");
+              appendLog("Not enough gold. You need 2,000,000 gold coins fine!");
               return;
             }
             s.gold -= 2000000;
             s.flags["exile:active"] = false;
             delete s.flags["exile:seed"];
             delete s.flags["exile:riskMissionsLeft"];
+            delete s.flags["old_town_hostile_entered"];
             s.flags["old_town_forgiven"] = true;
             s.flags["old_town_forgiven_gold"] = 2000000;
-            // Clear hostile effects
-            try { clearEffect("bleeding"); clearEffect("cursed"); } catch(e) {}
-            // Regenerate old town content as forgiven new start?
+            // Clear the permanent bleeding that kept you at 1 HP - now healing possible
+            try { 
+              if (s.effects && s.effects["bleeding"] && s.effects["bleeding"].oldTownBleed) {
+                delete s.effects["bleeding"];
+              } else {
+                clearEffect("bleeding");
+              }
+              clearEffect("weak");
+              clearEffect("fear");
+              clearEffect("cursed");
+              // Also clear any other hostile effects
+              if (s.effects) {
+                for (const k of ["bleeding","weak","fear","brittle","cursed"]) {
+                  if (s.effects[k]?.oldTownBleed || s.effects[k]?.isOldTownHostileBleed) delete s.effects[k];
+                }
+              }
+            } catch(e) {}
+            // Heal a bit after forgiveness so you are not at 1 HP
+            const maxHp = (typeof playerMaxHp === 'function' ? playerMaxHp() : (s.maxHp || 100));
+            s.hp = Math.max(1, Math.floor(maxHp * 0.35));
+            // Regenerate old town content as forgiven new start - new everything as per exile ripple
             const newSeed = (hashString(`forgiven:${s.profile}:${Date.now()}`) >>> 0);
             s.completed = { missions: {}, side: {} };
             if (typeof genMissions === 'function') s.missions = genMissions(MISSION_COUNT, newSeed);
             if (typeof genSideQuests === 'function') s.sideQuests = genSideQuests(SIDE_QUEST_COUNT, newSeed);
             if (typeof marketStockCache !== 'undefined') marketStockCache = null;
-            appendLog("💰 You pay 2,000,000 gold. The town grudgingly forgives you. You are no longer exiled.");
-            appendLog("🔄 Ripple: Old town forgives but still has new mobs/items after your payment - fresh start.");
+            // Reset NPC attitudes for new start
+            if (s.flags) s.flags.npcAttitudes = {};
+            appendLog("💰 You pay 2,000,000 gold fine. The town grudgingly forgives you. Permanent bleeding stops, healing now possible.");
+            appendLog("🔄 Ripple: Old town forgives but still has new mobs/items/NPCs after your payment - fresh start with everything replaced.");
           },
         },
         {
-          label: "Try to Fight Through (Everyone Attacks You)",
+          label: "Try to Fight Through (Everyone Attacks You - Bleeding to 1 HP)",
           next: "old_town_hostile",
           effect: () => {
-            appendLog("You try to fight... but everyone in old town attacks!");
-            addEffect("bleeding", 20000);
-            addEffect("brittle", 15000);
-            addEffect("fear", 12000);
-            applyDamage(Math.max(8, Math.floor(playerMaxHp() * 0.25)));
+            appendLog("You try to fight... but everyone in old town attacks! Beaten to near death again!");
+            // Beat to near death again - set HP to 1
+            const maxHp = (typeof playerMaxHp === 'function' ? playerMaxHp() : (s.maxHp || 100));
+            s.hp = 1;
+            // Ensure permanent bleeding that caps at 1 HP is active
+            s.effects = s.effects || {};
+            s.effects["bleeding"] = { key: "bleeding", permanent: true, appliedAt: Date.now(), isOldTownHostileBleed: true, oldTownBleed: true };
+            s.effects["brittle"] = s.effects["brittle"] || { key: "brittle", expiresAt: Date.now()+15000, appliedAt: Date.now() };
+            s.effects["fear"] = s.effects["fear"] || { key: "fear", expiresAt: Date.now()+12000, appliedAt: Date.now() };
+            s.effects["weak"] = s.effects["weak"] || { key: "weak", expiresAt: Date.now()+15000, appliedAt: Date.now() };
             // Trigger combat with hostile townsfolk (3-4 enemies)
             const tier = Math.min(5, 1 + Math.floor((s.level || 1) / 140));
             const ev = createCombatEvent(s, "town_hostile", mobDef((tier-1)*60+10));
-            // Add extra enemies to represent hostile town
             const extraCount = 3 + Math.floor(Math.random()*2);
             for (let i=0;i<extraCount;i++) {
               const idx = (tier - 1) * 60 + 1 + Math.floor(Math.random() * 60);
               const def = mobDef(idx);
-              const e = { ...def, hp: Math.floor(def.maxHp * 1.2), maxHp: Math.floor(def.maxHp * 1.2), atk: Math.floor(def.atk * 1.3) };
-              e.name = `[HOSTILE Old Town] ${e.name}`;
+              const e = { ...def, hp: Math.floor(def.maxHp * 1.4), maxHp: Math.floor(def.maxHp * 1.4), atk: Math.floor(def.atk * 1.5) };
+              e.name = `[HOSTILE Old Town] ${e.name} (Beats you to 1 HP)`;
               ev.enemies.push(e);
             }
             ev.log = [
-              "🏚️ Old Town Hostile - Everyone Attacks!",
-              "You are attacked by former neighbors, guards, and traders. Bleeding from their attacks!",
-              "If you survive, you can try to pay 2M gold to be forgiven.",
+              "🏚️ Old Town Hostile - Everyone Attacks! Beaten to near death!",
+              "Permanent bleeding keeps you at 1 HP - healing blocked! If you heal above 1, it drops back to 1.",
+              "You must leave town to stop bleeding and be able to heal, or pay 2M gold fine.",
             ];
             s.world.pendingEvent = ev;
           },
         },
         {
-          label: "Flee Back to New Town (Exile Town)",
+          label: "Flee Back to New Town (Exile Town) - Bleeding Stops, Healing Possible",
           next: "exile_town",
           className: "secondary",
           effect: () => {
-            appendLog("You flee back to the new exile town, bleeding and humiliated.");
-            addEffect("bleeding", 10000);
+            appendLog("You flee back to the new exile town. As soon as you leave Old Town, permanent bleeding stops!");
+            // Clear old town permanent bleeding when leaving - healing now possible
+            try {
+              if (s.effects && s.effects["bleeding"] && s.effects["bleeding"].oldTownBleed) {
+                delete s.effects["bleeding"];
+                appendLog("🩹 Old Town bleeding curse lifts as you leave. Healing now possible in new town.");
+              } else {
+                // If not old town specific, just clear and add short bleeding
+                clearEffect("bleeding");
+              }
+              if (s.effects) {
+                // Keep weak/fear but not bleeding
+                if (s.effects["weak"]?.oldTownBleed) delete s.effects["weak"];
+              }
+              delete s.flags["old_town_hostile_entered"];
+            } catch(e) {}
+            // Heal a tiny bit to show healing possible now
+            const maxHp = (typeof playerMaxHp === 'function' ? playerMaxHp() : (s.maxHp || 100));
+            if ((s.hp || 0) <= 1) {
+              s.hp = Math.max(1, Math.floor(maxHp * 0.15));
+              appendLog(`Healing possible again - restored to ${s.hp} HP in new town.`);
+            }
           },
         },
       ];

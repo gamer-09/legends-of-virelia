@@ -390,17 +390,46 @@ function tickEffects() {
   const t = nowMs();
 
   const bleed = state.effects.bleeding;
-  if (bleed && typeof bleed.expiresAt === "number" && bleed.expiresAt > t) {
-    if (typeof bleed.nextTickAt !== "number") bleed.nextTickAt = t + 5000;
-    if (t >= bleed.nextTickAt) {
-      const missed = Math.min(3, Math.floor((t - bleed.nextTickAt) / 5000) + 1);
-      bleed.nextTickAt = bleed.nextTickAt + missed * 5000;
-      const dealt = applyDamage(missed, { fromEffect: true }) || 0;
-      playEffectSfx("bleeding", "tick");
-      appendLog(`🩸 Bleeding hurts you (-${dealt} HP) - use Bandage or Healer to cure.`);
-      renderStats(); renderLog(); autoSave();
-      if (typeof maybeApplyDebuffFromSituation === 'function' && Math.random() < 0.25) {
-        try { maybeApplyDebuffFromSituation(state, "bleeding_long"); } catch(e) {}
+  // Special case: old town hostile permanent bleeding that keeps you at 1 HP until you leave
+  const isOldTownHostile = !!(state && (state.nodeId === "old_town_hostile"));
+  if (bleed) {
+    const isPermBleed = !!bleed.permanent;
+    const isActive = (typeof bleed.expiresAt === "number" && bleed.expiresAt > t) || isPermBleed || typeof bleed.pausedRemaining === 'number';
+    if (isActive) {
+      if (typeof bleed.nextTickAt !== "number") bleed.nextTickAt = t + 5000;
+      if (t >= bleed.nextTickAt) {
+        const missed = Math.min(3, Math.floor((t - bleed.nextTickAt) / 5000) + 1);
+        bleed.nextTickAt = bleed.nextTickAt + missed * 5000;
+        if (isOldTownHostile && isPermBleed) {
+          // In old town hostile, bleeding is permanent and caps at 1 HP - if HP goes above 1, reduce to 1
+          if ((state.hp || 0) > 1) {
+            const over = (state.hp || 0) - 1;
+            state.hp = 1;
+            appendLog(`🩸 Old Town Hostile: Permanent bleeding keeps you at 1 HP! (-${over} HP) - Leave town to stop, healing blocked until you leave.`);
+            playEffectSfx("bleeding", "tick");
+            renderStats(); renderLog(); autoSave();
+          } else {
+            // Already at 1 HP, still show tick but no further damage below 1
+            appendLog(`🩸 Old Town Hostile: Bleeding holds you at 1 HP - cannot heal here. Pay 2M fine or flee!`);
+            playEffectSfx("bleeding", "tick");
+            renderStats(); renderLog(); autoSave();
+          }
+        } else {
+          const dealt = applyDamage(missed, { fromEffect: true }) || 0;
+          playEffectSfx("bleeding", "tick");
+          appendLog(`🩸 Bleeding hurts you (-${dealt} HP) - use Bandage or Healer to cure.`);
+          renderStats(); renderLog(); autoSave();
+          if (typeof maybeApplyDebuffFromSituation === 'function' && Math.random() < 0.25) {
+            try { maybeApplyDebuffFromSituation(state, "bleeding_long"); } catch(e) {}
+          }
+        }
+      }
+      // Extra check: if in old town hostile and HP >1 due to healing, force back to 1 immediately (not just on tick)
+      if (isOldTownHostile && isPermBleed && (state.hp || 0) > 1) {
+        const over = (state.hp || 0) - 1;
+        state.hp = 1;
+        appendLog(`🩸 Old Town: Healing blocked! Bleeding reduces you back to 1 HP (-${over}). Leave town to heal.`);
+        renderStats(); renderLog(); autoSave();
       }
     }
   }
