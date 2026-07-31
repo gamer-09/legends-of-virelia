@@ -7120,6 +7120,7 @@ function endCombatIfNeeded(ev) {
           if (!state.flags["siege:crossroads:rewarded"]) {
             state.flags["siege:crossroads:rewarded"] = true;
             state.flags["siege:crossroads:completed"] = true;
+            state.flags["siege:crossroads:victory"] = true;
             const lvl = Math.max(1, Math.floor(state.level || 1));
             const xp = Math.max(baseXp, Math.floor(xpToNext(lvl) * 0.90) + 800 + baseTier * 120);
             const gold = Math.max(0, Math.floor(2500 + lvl * 40 + baseTier * 250));
@@ -7132,10 +7133,30 @@ function endCombatIfNeeded(ev) {
             addInvItem(state, pickCombatDropKey(5, 0.02), 1);
             addInvItem(state, pickCombatDropKey(5, 0.04), 1);
             pushCombatLog(ev, "🎁 Loot bonus: Phoenix Feather, 2 Elixirs, and rare salvage." );
+            // Ripple effect on success: town rebuilds with new everything (mobs, items, quests)
+            const victorySeed = (hashString(`victory:${state.profile}:${Date.now()}`) >>> 0);
+            state.flags["post_siege_rebuilt"] = true;
+            state.flags["post_siege_seed"] = victorySeed;
+            state.completed = { missions: {}, side: {} };
+            if (typeof genMissions === 'function') state.missions = genMissions(MISSION_COUNT, victorySeed);
+            if (typeof genSideQuests === 'function') state.sideQuests = genSideQuests(SIDE_QUEST_COUNT, victorySeed);
+            if (typeof marketStockCache !== 'undefined') marketStockCache = null;
+            pushCombatLog(ev, "🔄 Ripple Effect: Town rebuilds! New missions, side quests, market stock, and mobs appear. Old items replaced.");
           } else {
             state.flags["siege:crossroads:completed"] = true;
             pushCombatLog(ev, `🏆 Siege reward: +${baseXp} XP.`);
             gainXp(baseXp);
+            // Even on repeat victory, refresh town with new content
+            if (!state.flags["post_siege_rebuilt"]) {
+              const victorySeed = (hashString(`victory:${state.profile}:${Date.now()}`) >>> 0);
+              state.flags["post_siege_rebuilt"] = true;
+              state.flags["post_siege_seed"] = victorySeed;
+              state.completed = { missions: {}, side: {} };
+              if (typeof genMissions === 'function') state.missions = genMissions(MISSION_COUNT, victorySeed);
+              if (typeof genSideQuests === 'function') state.sideQuests = genSideQuests(SIDE_QUEST_COUNT, victorySeed);
+              if (typeof marketStockCache !== 'undefined') marketStockCache = null;
+              pushCombatLog(ev, "🔄 Ripple: Town refreshed again with new content.");
+            }
           }
         }
       } else {
@@ -11423,19 +11444,101 @@ const STORY = {
       const riskLine = risk > 0
         ? `The locals warn you: the first jobs here are killers. High risk missions remaining: ${risk}.`
         : "You’re learning the streets. The worst of the risk has passed.";
-      return `An exile town huddles under dim lanterns.\n${riskLine}`;
+      const seed = s.flags?.["exile:seed"] || 0;
+      return `An exile town huddles under dim lanterns. New everything: mobs, items, missions, side quests all regenerated with seed ${seed}.\n${riskLine}\n\nThis is your new home after failing the siege. Old town is hostile now.`;
     },
     choices: (s) => {
       const c = [
-        { label: "Browse Missions", next: "exile_town", effect: () => { activeTab = "missions"; setTabUi(); } },
-        { label: "Browse Side Quests", next: "exile_town", effect: () => { activeTab = "side"; setTabUi(); } },
-        { label: "Visit the Market", next: "market" },
-        { label: "Travel Destinations (50 places)", next: "travel_destinations" },
-        { label: "Free Roam (explore)", next: "free_roam_select" },
-        { label: "Visit the Tavern (recruit party)", next: "tavern" },
+        { label: "Browse Missions (New Town - New Mobs/Items)", next: "exile_town", effect: () => { activeTab = "missions"; setTabUi(); } },
+        { label: "Browse Side Quests (New Town)", next: "exile_town", effect: () => { activeTab = "side"; setTabUi(); } },
+        { label: "Visit the Market (New Stock)", next: "market" },
+        { label: "Travel Destinations (50 places - New)", next: "travel_destinations" },
+        { label: "Free Roam (explore new area)", next: "free_roam_select" },
+        { label: "Visit the Tavern (new recruits)", next: "tavern" },
+        { label: "Attempt to Return to Old Town (EXTREMELY DANGEROUS - 2M gold to be forgiven)", next: "old_town_hostile", className: "danger" },
       ];
       return c;
     },
+  },
+
+  old_town_hostile: {
+    text: (s) => {
+      return `You step back into Old Town - Crossroads. The moment they see you, whispers turn to shouts.\n"Traitor! You failed the siege! You let the horde in!"\n\nGuards draw blades, merchants slam shutters, former allies glare. Everyone attacks you on sight.\nYour old reputation is shattered. You feel blades graze you - bleeding starts.\n\nA town crier shouts: "Pay 2,000,000 gold to be forgiven, or leave forever!"\nGold: ${s.gold}\nEffects: ${(s.effects ? Object.keys(s.effects).join(", ") : "None")}`;
+    },
+    choices: (s) => {
+      return [
+        {
+          label: "Pay 2,000,000 Gold to be Forgiven and Return",
+          next: "crossroads",
+          disabled: (s.gold || 0) < 2000000,
+          effect: () => {
+            if ((s.gold || 0) < 2000000) {
+              appendLog("Not enough gold. You need 2,000,000 gold coins!");
+              return;
+            }
+            s.gold -= 2000000;
+            s.flags["exile:active"] = false;
+            delete s.flags["exile:seed"];
+            delete s.flags["exile:riskMissionsLeft"];
+            s.flags["old_town_forgiven"] = true;
+            s.flags["old_town_forgiven_gold"] = 2000000;
+            // Clear hostile effects
+            try { clearEffect("bleeding"); clearEffect("cursed"); } catch(e) {}
+            // Regenerate old town content as forgiven new start?
+            const newSeed = (hashString(`forgiven:${s.profile}:${Date.now()}`) >>> 0);
+            s.completed = { missions: {}, side: {} };
+            if (typeof genMissions === 'function') s.missions = genMissions(MISSION_COUNT, newSeed);
+            if (typeof genSideQuests === 'function') s.sideQuests = genSideQuests(SIDE_QUEST_COUNT, newSeed);
+            if (typeof marketStockCache !== 'undefined') marketStockCache = null;
+            appendLog("💰 You pay 2,000,000 gold. The town grudgingly forgives you. You are no longer exiled.");
+            appendLog("🔄 Ripple: Old town forgives but still has new mobs/items after your payment - fresh start.");
+          },
+        },
+        {
+          label: "Try to Fight Through (Everyone Attacks You)",
+          next: "old_town_hostile",
+          effect: () => {
+            appendLog("You try to fight... but everyone in old town attacks!");
+            addEffect("bleeding", 20000);
+            addEffect("brittle", 15000);
+            addEffect("fear", 12000);
+            applyDamage(Math.max(8, Math.floor(playerMaxHp() * 0.25)));
+            // Trigger combat with hostile townsfolk (3-4 enemies)
+            const tier = Math.min(5, 1 + Math.floor((s.level || 1) / 140));
+            const ev = createCombatEvent(s, "town_hostile", mobDef((tier-1)*60+10));
+            // Add extra enemies to represent hostile town
+            const extraCount = 3 + Math.floor(Math.random()*2);
+            for (let i=0;i<extraCount;i++) {
+              const idx = (tier - 1) * 60 + 1 + Math.floor(Math.random() * 60);
+              const def = mobDef(idx);
+              const e = { ...def, hp: Math.floor(def.maxHp * 1.2), maxHp: Math.floor(def.maxHp * 1.2), atk: Math.floor(def.atk * 1.3) };
+              e.name = `[HOSTILE Old Town] ${e.name}`;
+              ev.enemies.push(e);
+            }
+            ev.log = [
+              "🏚️ Old Town Hostile - Everyone Attacks!",
+              "You are attacked by former neighbors, guards, and traders. Bleeding from their attacks!",
+              "If you survive, you can try to pay 2M gold to be forgiven.",
+            ];
+            s.world.pendingEvent = ev;
+          },
+        },
+        {
+          label: "Flee Back to New Town (Exile Town)",
+          next: "exile_town",
+          className: "secondary",
+          effect: () => {
+            appendLog("You flee back to the new exile town, bleeding and humiliated.");
+            addEffect("bleeding", 10000);
+          },
+        },
+      ];
+    },
+  },
+
+  old_town_forgiven: {
+    text: (s) => `You are forgiven after paying 2M gold. The old town still eyes you warily, but no longer attacks.\nGold: ${s.gold}`,
+    choices: (s) => [{ label: "Back to Crossroads (Old Town Renewed)", next: "crossroads" }],
   },
 
   courier: {

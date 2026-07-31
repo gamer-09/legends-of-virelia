@@ -2125,6 +2125,7 @@ function endCombatIfNeeded(ev) {
           if (!state.flags["siege:crossroads:rewarded"]) {
             state.flags["siege:crossroads:rewarded"] = true;
             state.flags["siege:crossroads:completed"] = true;
+            state.flags["siege:crossroads:victory"] = true;
             const lvl = Math.max(1, Math.floor(state.level || 1));
             const xp = Math.max(baseXp, Math.floor(xpToNext(lvl) * 0.90) + 800 + baseTier * 120);
             const gold = Math.max(0, Math.floor(2500 + lvl * 40 + baseTier * 250));
@@ -2137,10 +2138,30 @@ function endCombatIfNeeded(ev) {
             addInvItem(state, pickCombatDropKey(5, 0.02), 1);
             addInvItem(state, pickCombatDropKey(5, 0.04), 1);
             pushCombatLog(ev, "🎁 Loot bonus: Phoenix Feather, 2 Elixirs, and rare salvage." );
+            // Ripple effect on success: town rebuilds with new everything (mobs, items, quests)
+            const victorySeed = (hashString(`victory:${state.profile}:${Date.now()}`) >>> 0);
+            state.flags["post_siege_rebuilt"] = true;
+            state.flags["post_siege_seed"] = victorySeed;
+            state.completed = { missions: {}, side: {} };
+            if (typeof genMissions === 'function') state.missions = genMissions(MISSION_COUNT, victorySeed);
+            if (typeof genSideQuests === 'function') state.sideQuests = genSideQuests(SIDE_QUEST_COUNT, victorySeed);
+            if (typeof marketStockCache !== 'undefined') marketStockCache = null;
+            pushCombatLog(ev, "🔄 Ripple Effect: Town rebuilds! New missions, side quests, market stock, and mobs appear. Old items replaced.");
           } else {
             state.flags["siege:crossroads:completed"] = true;
             pushCombatLog(ev, `🏆 Siege reward: +${baseXp} XP.`);
             gainXp(baseXp);
+            // Even on repeat victory, refresh town with new content
+            if (!state.flags["post_siege_rebuilt"]) {
+              const victorySeed = (hashString(`victory:${state.profile}:${Date.now()}`) >>> 0);
+              state.flags["post_siege_rebuilt"] = true;
+              state.flags["post_siege_seed"] = victorySeed;
+              state.completed = { missions: {}, side: {} };
+              if (typeof genMissions === 'function') state.missions = genMissions(MISSION_COUNT, victorySeed);
+              if (typeof genSideQuests === 'function') state.sideQuests = genSideQuests(SIDE_QUEST_COUNT, victorySeed);
+              if (typeof marketStockCache !== 'undefined') marketStockCache = null;
+              pushCombatLog(ev, "🔄 Ripple: Town refreshed again with new content.");
+            }
           }
         }
       } else {
