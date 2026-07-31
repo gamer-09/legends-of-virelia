@@ -436,22 +436,28 @@ function equipmentBonusForItem(key) {
   const kk = k.toLowerCase();
   if (group === "weapon") {
     const primary = /(staff|wand)/i.test(kk) ? "arcana" : (/(dagger|bow|crossbow)/i.test(kk) ? "cunning" : "strength");
-    bump(primary, 1 + Math.floor(power * 0.7) + (h % 2));
-    bump("strength", /(staff|wand)/i.test(kk) ? Math.floor(power * 0.3) : 0);
-    bump("cunning", /(dagger|bow|crossbow)/i.test(kk) ? Math.floor(power * 0.3) : (h % 2));
-    out.dmgMult = 1 + clamp(0.03 * power + ((h % 7) * 0.01), 0.03, 0.18);
-    out.dmgFlat = 1 + power + (h % 3);
-    if (/(staff|wand)/i.test(kk)) out.maxMana = 1 + power + (h % 4);
+    // Remoduled for 700 cap: weapon gives more stats and damage
+    bump(primary, 1 + Math.floor(power * 0.9) + (h % 3) + Math.floor(power / 2));
+    bump("strength", /(staff|wand)/i.test(kk) ? Math.floor(power * 0.4) : Math.floor(power * 0.2));
+    bump("cunning", /(dagger|bow|crossbow)/i.test(kk) ? Math.floor(power * 0.4) : (h % 2));
+    // Higher damage multipliers for high tier (power 0-4, but for 700 cap we want up to 0.45)
+    out.dmgMult = 1 + clamp(0.05 * power + ((h % 7) * 0.015) + power * 0.02, 0.05, 0.48);
+    out.dmgFlat = 2 + power * 2 + (h % 5) + Math.floor(power * 1.2);
+    if (/(staff|wand)/i.test(kk)) {
+      out.maxMana = 2 + power * 2 + (h % 6);
+      // Magic damage bonus for staff/wand
+      out.dmgMult += 0.03 * power;
+    }
     return out;
   }
 
   if (group === "armor") {
-    bump("resilience", 1 + Math.floor(power * 0.8) + (h % 2));
-    out.maxHp = 3 + power * 4 + (h % 7);
-    const red = clamp(0.03 * power + ((h % 5) * 0.01), 0.04, 0.22);
+    bump("resilience", 2 + Math.floor(power * 1.1) + (h % 3));
+    out.maxHp = 5 + power * 8 + (h % 12) + Math.floor(power * 1.5);
+    const red = clamp(0.05 * power + ((h % 5) * 0.015) + power * 0.015, 0.06, 0.38);
     out.damageTakenMult = 1 - red;
-    if (/(cloak|boots)/i.test(kk)) bump("cunning", Math.floor(power * 0.4));
-    if (/helm/i.test(kk)) bump("arcana", Math.floor(power * 0.3));
+    if (/(cloak|boots)/i.test(kk)) bump("cunning", Math.floor(power * 0.6));
+    if (/helm/i.test(kk)) bump("arcana", Math.floor(power * 0.5));
     return out;
   }
 
@@ -5494,9 +5500,11 @@ function mobDef(mobIdOrIndex) {
   const powerful = (seed % 17) === 0 || tier >= 4;
   const name = `${mods[seed % mods.length]} ${species[(seed >>> 4) % species.length]}`;
 
-  const baseHp = 18 + tier * 14 + (powerful ? 22 : 0) + (seed % 11);
-  const atk = 4 + tier * 4 + (powerful ? 4 : 0) + (seed % 5);
-  const acc = clamp(0.62 + tier * 0.03 + (powerful ? 0.05 : 0) + ((seed % 7) - 3) * 0.01, 0.55, 0.90);
+  // Remoduled for player cap 700: base stats much higher for high tiers
+  // Old: 18+ tier*14 (~88 for tier5). New: scales quadratically to remain challenging at 700
+  const baseHp = 28 + tier * 22 + tier * tier * 12 + (powerful ? 35 + tier * 8 : 0) + (seed % 18);
+  const atk = 6 + tier * 6 + tier * tier * 2 + (powerful ? 8 + tier * 2 : 0) + (seed % 7);
+  const acc = clamp(0.60 + tier * 0.04 + (powerful ? 0.06 : 0) + ((seed % 7) - 3) * 0.01, 0.55, 0.93);
 
   const requiresParty = tier >= 5 || (powerful && tier >= 4);
   const requiresPartySize = requiresParty ? 3 : (tier >= 4 ? 2 : 1);
@@ -5518,8 +5526,10 @@ function mobDef(mobIdOrIndex) {
 function pickMobForEncounter(s, kind) {
   const lvl = Math.max(1, Math.floor(s?.level || 1));
   const p = partySize(s);
-  const baseTier = clamp(1 + Math.floor((lvl - 1) / 4), 1, 5);
-  const bumpChance = lvl >= 16 ? 0.24 : 0.18;
+  // Remoduled for cap 700: tier progression slower, tier5 is endgame 560+ but can appear earlier with bump
+  // Old: floor((lvl-1)/4) -> tier5 at lvl 17. New: tier1 1-139, tier2 140-279, tier3 280-419, tier4 420-559, tier5 560+
+  const baseTier = clamp(1 + Math.floor((lvl - 1) / 140), 1, 5);
+  const bumpChance = lvl >= 100 ? 0.35 : (lvl >= 50 ? 0.28 : 0.18);
   const bump = Math.random() < bumpChance ? 1 : 0;
   const tier = clamp(baseTier + bump, 1, 5);
 
@@ -5552,21 +5562,32 @@ function scaleEnemyForPlayerLevel(enemy, s, encounterKind) {
   if (!enemy || !s) return enemy;
   const lvl = Math.max(1, Math.floor(s?.level || 1));
   const tier = Math.max(1, Math.floor(enemy.tier || 1));
-  const expected = 1 + (tier - 1) * 4;
+  // Remoduled expected levels for 700 cap: tier1 1, tier2 80, tier3 200, tier4 380, tier5 580
+  // This makes tier5 appropriate for 580-700 endgame, but still scales beyond
+  const expectedByTier = {1:1, 2:80, 3:200, 4:380, 5:580};
+  const expected = expectedByTier[tier] || (1 + (tier - 1) * 140);
   const over = Math.max(0, lvl - expected);
   if (over <= 0) return enemy;
 
   const kind = String(encounterKind || "").toLowerCase();
   const isQuest = kind === "mission" || kind === "side";
 
-  const hpRate = isQuest ? 0.08 : 0.12;
-  const atkRate = isQuest ? 0.06 : 0.08;
-  const accRate = isQuest ? 0.008 : 0.010;
+  // Higher rates for high level scaling to keep challenge at 700
+  // For 700 cap, need much higher multipliers - old capped at 2.8x, new allows up to 80x for quests, 120x for wild
+  const hpRate = isQuest ? 0.07 : 0.11;
+  const atkRate = isQuest ? 0.05 : 0.075;
+  const accRate = isQuest ? 0.0008 : 0.0012;
 
   const powerfulBonus = enemy.powerful ? 1 : 0;
-  const hpMul = clamp((1 + over * hpRate) * (1 + powerfulBonus * 0.08), 1, isQuest ? 2.30 : 2.80);
-  const atkMul = clamp((1 + over * atkRate) * (1 + powerfulBonus * 0.07), 1, isQuest ? 1.85 : 2.00);
-  const accAdd = clamp(over * accRate + powerfulBonus * 0.01, 0, isQuest ? 0.10 : 0.12);
+  // Caps raised dramatically for 700 cap: old 2.8x now 85x, old 2.0x now 55x
+  const hpCap = isQuest ? 85 : 120;
+  const atkCap = isQuest ? 55 : 75;
+  const accCap = isQuest ? 0.22 : 0.28;
+  // Add quadratic scaling for very high over (beyond 200)
+  const overQuad = over > 200 ? Math.pow(over - 200, 1.15) * 0.001 : 0;
+  const hpMul = clamp((1 + over * hpRate + overQuad) * (1 + powerfulBonus * 0.12), 1, hpCap);
+  const atkMul = clamp((1 + over * atkRate + overQuad * 0.6) * (1 + powerfulBonus * 0.10), 1, atkCap);
+  const accAdd = clamp(over * accRate + powerfulBonus * 0.015, 0, accCap);
 
   if (typeof enemy.maxHp === "number") enemy.maxHp = Math.max(1, Math.round(enemy.maxHp * hpMul));
   if (typeof enemy.hp === "number" && typeof enemy.maxHp === "number") enemy.hp = Math.min(enemy.maxHp, Math.round(enemy.hp * hpMul));
@@ -5797,7 +5818,9 @@ function executeCombatSkill(skillKey, ev) {
   const dmgScalar = 0.85 + skillRoll01(def, "dmg") * 0.30;
 
   if (focus === "strength") {
-    const base = 6 + playerStat("strength") * 1.1;
+    const plvl = Math.max(1, Math.floor(state?.level || 1));
+    const lvlBonus = plvl * 0.6 + (plvl > 100 ? (plvl-100)*0.4 : 0) + (plvl > 300 ? (plvl-300)*0.3 : 0);
+    const base = 6 + playerStat("strength") * 1.25 + lvlBonus;
     if (v === 1) {
       const list = aliveEnemies(ev);
       const per = 0.60 + skillRoll01(def, "cleave") * 0.10;
@@ -5868,7 +5891,9 @@ function executeCombatSkill(skillKey, ev) {
       return false;
     }
     state.mana -= manaCost;
-    const base = 10 + playerStat("arcana") * 1.4;
+    const plvlA = Math.max(1, Math.floor(state?.level || 1));
+    const lvlBonusA = plvlA * 0.5 + (plvlA > 100 ? (plvlA-100)*0.35 : 0) + (plvlA > 300 ? (plvlA-300)*0.25 : 0);
+    const base = 10 + playerStat("arcana") * 1.5 + lvlBonusA;
     if (v === 1) {
       const list = aliveEnemies(ev);
       const per = 0.50 + skillRoll01(def, "chain") * 0.15;
@@ -6717,7 +6742,7 @@ function partyAutoAttack(ev) {
   const target = enemies[0];
 
   let boost = (ev.partyDmgBoostTurns || 0) > 0 ? (1 + (ev.partyDmgBoost || 0)) : 1;
-  // Effects now do something meaningful in combat
+  // Effects do meaningful combat
   if (hasEffectOnState(state, "stormseed")) boost *= 1.18;
   if (hasEffectOnState(state, "titanblood")) boost *= 1.22;
   if (hasEffectOnState(state, "sunfire")) boost *= 1.14;
@@ -6727,7 +6752,16 @@ function partyAutoAttack(ev) {
   if (hasEffectOnState(state, "smokeveil")) boost *= 1.05;
   if (hasEffectOnState(state, "aether")) boost *= 1.06;
   if (hasEffectOnState(state, "well_fed")) boost *= 1.04;
-  if (hasEffectOnState(state, "cursed")) boost *= 0.88; // cursed weakens
+  if (hasEffectOnState(state, "cursed")) boost *= 0.88;
+  // Level scaling for attack power - at 700 cap, add level bonus
+  const playerLvl = Math.max(1, Math.floor(state?.level || 1));
+  if (playerLvl > 100) boost *= (1 + (playerLvl - 100) * 0.002); // +0.2% per level beyond 100, ~120% extra at 700
+  if (playerLvl > 300) boost *= (1 + (playerLvl - 300) * 0.001); // extra
+  // New debuffs reduce damage
+  if (hasEffectOnState(state, "weak")) boost *= 0.82;
+  if (hasEffectOnState(state, "brittle")) boost *= 0.88;
+  if (hasEffectOnState(state, "withered")) boost *= 0.75;
+  if (hasEffectOnState(state, "soulfractured")) boost *= 0.80;
 
 
   const actors = allPartyActors(state);
@@ -7200,7 +7234,18 @@ function computeCompanionSheet(level, prof, build, seedKey) {
   for (const [k, v] of Object.entries(p?.bonuses || {})) stats[k] = (stats[k] || 0) + Math.max(0, Math.floor(v || 0));
   for (const [k, v] of Object.entries(b?.bonuses || {})) stats[k] = (stats[k] || 0) + Math.max(0, Math.floor(v || 0));
 
-  const extra = Math.max(0, Math.floor((lvl - 1) * 1.15) + Math.floor((lvl - 1) / 2));
+  // Remoduled for 700 cap: more stats per level after 100, to keep companions relevant
+  let extra = 0;
+  if (lvl <= 100) {
+    extra = Math.max(0, Math.floor((lvl - 1) * 1.15) + Math.floor((lvl - 1) / 2));
+  } else if (lvl <= 300) {
+    extra = Math.floor(99 * 1.15 + 49) + Math.floor((lvl - 100) * 1.35) + Math.floor((lvl - 100) / 2);
+  } else if (lvl <= 500) {
+    extra = Math.floor(99 * 1.15 + 49) + Math.floor(200 * 1.35 + 100) + Math.floor((lvl - 300) * 1.55) + Math.floor((lvl - 300) / 2);
+  } else {
+    extra = Math.floor(99 * 1.15 + 49) + Math.floor(200 * 1.35 + 100) + Math.floor(200 * 1.55 + 100) + Math.floor((lvl - 500) * 1.85) + Math.floor((lvl - 500) / 2);
+  }
+  extra = Math.max(0, Math.floor(extra));
   const profFocus = companionProfessionFocusKey(prof);
   const buildFocus = companionBuildFocusKey(build);
   const weights = {
@@ -7228,8 +7273,16 @@ function computeCompanionSheet(level, prof, build, seedKey) {
     }
   }
 
-  const baseHp = 30 + (p?.hpBonus || 0) + (b?.hpBonus || 0) + lvl * 6 + (stats.resilience || 0) * 4;
-  const baseMana = 14 + (p?.manaBonus || 0) + (b?.manaBonus || 0) + lvl * 4 + (stats.arcana || 0) * 4;
+  // Remoduled HP/Mana for 700 cap: more HP per level after 100
+  let hpPerLvl = 6;
+  let manaPerLvl = 4;
+  if (lvl > 100) hpPerLvl = 7;
+  if (lvl > 300) hpPerLvl = 8;
+  if (lvl > 500) hpPerLvl = 9;
+  if (lvl > 100) manaPerLvl = 5;
+  if (lvl > 300) manaPerLvl = 6;
+  const baseHp = 35 + (p?.hpBonus || 0) + (b?.hpBonus || 0) + lvl * hpPerLvl + (stats.resilience || 0) * 5 + Math.floor(lvl / 50) * 10;
+  const baseMana = 18 + (p?.manaBonus || 0) + (b?.manaBonus || 0) + lvl * manaPerLvl + (stats.arcana || 0) * 5 + Math.floor(lvl / 60) * 8;
 
   return {
     stats,

@@ -436,22 +436,28 @@ function equipmentBonusForItem(key) {
   const kk = k.toLowerCase();
   if (group === "weapon") {
     const primary = /(staff|wand)/i.test(kk) ? "arcana" : (/(dagger|bow|crossbow)/i.test(kk) ? "cunning" : "strength");
-    bump(primary, 1 + Math.floor(power * 0.7) + (h % 2));
-    bump("strength", /(staff|wand)/i.test(kk) ? Math.floor(power * 0.3) : 0);
-    bump("cunning", /(dagger|bow|crossbow)/i.test(kk) ? Math.floor(power * 0.3) : (h % 2));
-    out.dmgMult = 1 + clamp(0.03 * power + ((h % 7) * 0.01), 0.03, 0.18);
-    out.dmgFlat = 1 + power + (h % 3);
-    if (/(staff|wand)/i.test(kk)) out.maxMana = 1 + power + (h % 4);
+    // Remoduled for 700 cap: weapon gives more stats and damage
+    bump(primary, 1 + Math.floor(power * 0.9) + (h % 3) + Math.floor(power / 2));
+    bump("strength", /(staff|wand)/i.test(kk) ? Math.floor(power * 0.4) : Math.floor(power * 0.2));
+    bump("cunning", /(dagger|bow|crossbow)/i.test(kk) ? Math.floor(power * 0.4) : (h % 2));
+    // Higher damage multipliers for high tier (power 0-4, but for 700 cap we want up to 0.45)
+    out.dmgMult = 1 + clamp(0.05 * power + ((h % 7) * 0.015) + power * 0.02, 0.05, 0.48);
+    out.dmgFlat = 2 + power * 2 + (h % 5) + Math.floor(power * 1.2);
+    if (/(staff|wand)/i.test(kk)) {
+      out.maxMana = 2 + power * 2 + (h % 6);
+      // Magic damage bonus for staff/wand
+      out.dmgMult += 0.03 * power;
+    }
     return out;
   }
 
   if (group === "armor") {
-    bump("resilience", 1 + Math.floor(power * 0.8) + (h % 2));
-    out.maxHp = 3 + power * 4 + (h % 7);
-    const red = clamp(0.03 * power + ((h % 5) * 0.01), 0.04, 0.22);
+    bump("resilience", 2 + Math.floor(power * 1.1) + (h % 3));
+    out.maxHp = 5 + power * 8 + (h % 12) + Math.floor(power * 1.5);
+    const red = clamp(0.05 * power + ((h % 5) * 0.015) + power * 0.015, 0.06, 0.38);
     out.damageTakenMult = 1 - red;
-    if (/(cloak|boots)/i.test(kk)) bump("cunning", Math.floor(power * 0.4));
-    if (/helm/i.test(kk)) bump("arcana", Math.floor(power * 0.3));
+    if (/(cloak|boots)/i.test(kk)) bump("cunning", Math.floor(power * 0.6));
+    if (/helm/i.test(kk)) bump("arcana", Math.floor(power * 0.5));
     return out;
   }
 
