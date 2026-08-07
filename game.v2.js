@@ -391,16 +391,37 @@ try {
 
 /* 6. FREE ROAM MAP */
 const V2_AREAS = {
-  streets: { label:'Low Streets', danger:1, minLevel:1, cost:{}, connects:['docks','market','gate','ruins'], desc:'Crowded, watchful. Rumors. Level 1+' },
-  docks: { label:'Dock Warrens', danger:2, minLevel:15, cost:{ waterskin:1 }, connects:['streets','marsh','market'], desc:'Salt, knives. Level 15+ recommended.' },
+  streets: { label:'Low Streets', danger:1, minLevel:1, cost:{}, connects:['docks','market','gate','ruins','mini_lair_70'], desc:'Crowded, watchful. Rumors. Level 1+ Road to mini-boss 70' },
+  docks: { label:'Dock Warrens', danger:2, minLevel:15, cost:{ waterskin:1 }, connects:['streets','marsh','market'], desc:'Salt, knives. Level 15+.' },
   market: { label:'High Market', danger:0, minLevel:1, cost:{}, connects:['streets','docks','gate','crossroads'], desc:'Safe-ish. Korg forge. Level 1+' },
-  gate: { label:'Virelia Gate', danger:1, minLevel:10, cost:{ waterskin:1 }, connects:['streets','road','market'], desc:'Leaving costs water. Level 10+ recommended.' },
-  road: { label:'Open Road', danger:2, minLevel:40, cost:{ ration:1, waterskin:1 }, connects:['gate','ruins','marsh'], desc:'Ambush chance. Level 40+ recommended.' },
-  ruins: { label:'Old Ruins', danger:3, minLevel:80, cost:{ torch:1, ration:1 }, connects:['road','streets','vault'], desc:'Needs torch else -20% accuracy. Hollow child. Level 80+ (Hard).' },
-  marsh: { label:'Fog Marsh', danger:3, minLevel:120, cost:{ ration:1, waterskin:1 }, connects:['road','docks','wilds'], desc:'High wilds. Level 120+ (Hard+).' },
-  vault: { label:'Sun Vault Approach', danger:4, minLevel:250, cost:{ torch:1, waterskin:1 }, connects:['ruins'], desc:'Shard may be found. Level 250+ (Elite).' },
-  wilds: { label:'Deep Wilds', danger:5, minLevel:400, cost:{ ration:2, waterskin:2, torch:1 }, connects:['marsh'], desc:'Most dangerous. Level 400+ (Legendary). Wilds+1 if camp no ritual.' },
-  crossroads: { label:'Crossroads', danger:0, minLevel:1, cost:{}, connects:['market','streets','road'], desc:'Hub. Level 1+' }
+  gate: { label:'Virelia Gate', danger:1, minLevel:10, cost:{ waterskin:1 }, connects:['streets','road','market'], desc:'Leaving costs water. Level 10+.' },
+  road: { label:'Open Road', danger:2, minLevel:40, cost:{ ration:1, waterskin:1 }, connects:['gate','ruins','marsh','mini_lair_70'], desc:'Ambush chance. Level 40+ Road to mini-boss 70.' },
+  ruins: { label:'Old Ruins', danger:3, minLevel:80, cost:{ torch:1, ration:1 }, connects:['road','streets','vault','mini_lair_70','mini_lair_90','boss_lair_200'], desc:'Needs torch else -20% accuracy. Hollow child. Level 80+ (Hard) Road to mini 70/90 and boss 200.' },
+  marsh: { label:'Fog Marsh', danger:3, minLevel:120, cost:{ ration:1, waterskin:1 }, connects:['road','docks','wilds','mini_lair_80'], desc:'High wilds. Level 120+ (Hard+) Road to mini 80.' },
+  vault: { label:'Sun Vault Approach', danger:4, minLevel:250, cost:{ torch:1, waterskin:1 }, connects:['ruins','mini_lair_90','boss_lair_200','boss_lair_400','boss_lair_900'], desc:'Shard may be found. Level 250+ (Elite) Road to mini 90 and bosses 200/400/900.' },
+  wilds: { label:'Deep Wilds', danger:5, minLevel:400, cost:{ ration:2, waterskin:2, torch:1 }, connects:['marsh','mini_lair_80','boss_lair_400','boss_lair_600','boss_lair_800'], desc:'Most dangerous. Level 400+ (Legendary) Road to mini 80 and bosses 400/600/800.' },
+  crossroads: { label:'Crossroads', danger:0, minLevel:1, cost:{}, connects:['market','streets','road'], desc:'Hub. Level 1+ Roads to all via free roam map.' },
+  // Mini-boss lairs - level 70-90 as requested - with lairs and roads
+  mini_lair_70: { label:'Whispering Hollow (Mini-Boss Lv70)', danger:3, minLevel:70, cost:{ torch:1, ration:1 }, connects:['ruins','road','streets'], desc:'Mini-boss lair. Level 70. Boss: Hollow Warden. Road to boss map via ruins/road.' },
+  mini_lair_80: { label:'Fog Mire Den (Mini-Boss Lv80)', danger:4, minLevel:80, cost:{ ration:1, waterskin:1, torch:1 }, connects:['marsh','wilds'], desc:'Mini-boss lair. Level 80. Boss: Mire Chieftain. Road via marsh/wilds.' },
+  mini_lair_90: { label:'Sunken Chapel (Mini-Boss Lv90)', danger:4, minLevel:90, cost:{ torch:1, ration:1, waterskin:1 }, connects:['ruins','vault'], desc:'Mini-boss lair. Level 90 (highest mini-boss). Boss: Drowned Saint. Road via ruins/vault.' },
+  // Boss lairs - lowest boss 200, highest 800-900 as requested - with lairs, missions, roads
+  boss_lair_200: { label:'Bone King Crypt (Boss Lv200)', danger:5, minLevel:200, cost:{ torch:2, ration:2, waterskin:1 }, connects:['ruins','vault'], desc:'Boss lair. Level 200 (lowest boss). Boss: Bone King. Legendary rank. Road to boss map via ruins/vault.' },
+  boss_lair_400: { label:'Ashen Citadel (Boss Lv400)', danger:5, minLevel:400, cost:{ torch:2, ration:2, waterskin:2 }, connects:['vault','wilds'], desc:'Boss lair. Level 400. Boss: Ash Tyrant. Legendary. Road via vault/wilds.' },
+  boss_lair_600: { label:'Void Scar (Boss Lv600)', danger:6, minLevel:600, cost:{ torch:3, ration:3, waterskin:3 }, connects:['wilds'], desc:'Boss lair. Level 600. Boss: Void Harbinger. Legendary. Road via wilds.' },
+  boss_lair_800: { label:'Stormpeak Throne (Boss Lv800)', danger:6, minLevel:800, cost:{ torch:3, ration:3, waterskin:3, ember_gem:1 }, connects:['wilds'], desc:'Boss lair. Level 800 (high boss). Boss: Storm Emperor. Legendary. Road via wilds.' },
+  boss_lair_900: { label:'Sun Vault Core (Boss Lv900 - Highest)', danger:7, minLevel:900, cost:{ torch:3, ration:3, waterskin:3, ember_gem:1, rune_shard:1 }, connects:['vault'], desc:'Boss lair. Level 900 (highest boss). Boss: Sun Vault Overlord. Legendary rank. Final. Road via vault.' },
+};
+
+const BOSS_DEFS = {
+  mini_70: { level:70, name:"Hollow Warden", tier:4, hpMult:3.5, atkMult:2.2, desc:"Mini-boss Lv70 - guards Whispering Hollow. Drops rare." },
+  mini_80: { level:80, name:"Mire Chieftain", tier:4, hpMult:4.0, atkMult:2.4, desc:"Mini-boss Lv80 - Fog Mire Den." },
+  mini_90: { level:90, name:"Drowned Saint", tier:5, hpMult:4.8, atkMult:2.8, desc:"Mini-boss Lv90 - highest mini boss, Sunken Chapel." },
+  boss_200: { level:200, name:"Bone King", tier:5, hpMult:7.5, atkMult:3.5, legendary:true, desc:"Boss Lv200 lowest boss - Bone King Crypt." },
+  boss_400: { level:400, name:"Ash Tyrant", tier:5, hpMult:12, atkMult:5.0, legendary:true, desc:"Boss Lv400 - Ashen Citadel." },
+  boss_600: { level:600, name:"Void Harbinger", tier:5, hpMult:18, atkMult:6.5, legendary:true, desc:"Boss Lv600 - Void Scar." },
+  boss_800: { level:800, name:"Storm Emperor", tier:5, hpMult:24, atkMult:8.0, legendary:true, desc:"Boss Lv800 high boss - Stormpeak Throne." },
+  boss_900: { level:900, name:"Sun Vault Overlord", tier:5, hpMult:30, atkMult:10.0, legendary:true, desc:"Boss Lv900 highest boss - Sun Vault Core, final." },
 };
 
 function ensureV2Roam(s) {
@@ -544,6 +565,66 @@ function roamActV2(s, kind) {
     if (typeof render === 'function') render();
     return;
   }
+  // Boss lair handling - lowest boss 200, highest 800/900, mini bosses 70-90
+  const bossKeyMap = {
+    'mini_lair_70': 'mini_70',
+    'mini_lair_80': 'mini_80',
+    'mini_lair_90': 'mini_90',
+    'boss_lair_200': 'boss_200',
+    'boss_lair_400': 'boss_400',
+    'boss_lair_600': 'boss_600',
+    'boss_lair_800': 'boss_800',
+    'boss_lair_900': 'boss_900'
+  };
+  const bossDefKey = bossKeyMap[area.key];
+  if (bossDefKey && BOSS_DEFS[bossDefKey]) {
+    const bossInfo = BOSS_DEFS[bossDefKey];
+    if (kind === 'explore') {
+      appendLog(`You enter ${area.label} - ${bossInfo.desc} Level ${bossInfo.level} ${bossInfo.legendary ? '[LEGENDARY]' : '[MINI-BOSS]'}!`);
+      // Check level requirement already done in travel, but also check here for spell lock etc
+      const playerLvl = Math.max(1, Math.floor(s.level || 1));
+      if (playerLvl + 20 < bossInfo.level) {
+        appendLog(`⚠️ Boss Lv${bossInfo.level} far above you Lv${playerLvl}! Success rate 2% or less! You should not be here!`);
+        addEffect("fear", 15000);
+      }
+      // Create boss combat
+      const tier = bossInfo.tier || 5;
+      const idx = (tier - 1) * 60 + 1 + Math.floor(Math.random() * 60);
+      const baseDef = mobDef(idx);
+      const boss = { ...baseDef };
+      boss.name = `${bossInfo.name} [${bossInfo.legendary ? 'LEGENDARY' : 'MINI-BOSS'} Lv${bossInfo.level}]`;
+      boss.recLevel = bossInfo.level;
+      boss.tier = tier;
+      boss.legendaryRank = !!bossInfo.legendary;
+      boss.powerful = true;
+      boss.maxHp = Math.max(500, Math.floor((baseDef.maxHp || 100) * bossInfo.hpMult + bossInfo.level * 8));
+      boss.hp = boss.maxHp;
+      boss.atk = Math.max(30, Math.floor((baseDef.atk || 20) * bossInfo.atkMult + bossInfo.level * 1.2));
+      boss.acc = 0.88;
+      boss.bossLair = bossDefKey;
+      // Create combat event
+      const ev = createCombatEvent(s, "boss", boss);
+      ev.encounterKind = "boss_lair";
+      ev.bossInfo = bossInfo;
+      ev.log = [
+        `🏰 Boss Lair: ${area.label} - ${bossInfo.name} Lv${bossInfo.level} ${bossInfo.legendary ? '[LEGENDARY]' : '[MINI-BOSS]'}`,
+        `${bossInfo.desc}`,
+        `Road to boss map: ${area.desc}`,
+        `If you are Lv${playerLvl} vs Lv${bossInfo.level}, success drops to 2-5% as requested!`,
+      ];
+      s.world.pendingEvent = ev;
+      return;
+    } else if (kind === 'forage') {
+      appendLog(`You search ${area.label} for loot near boss lair...`);
+      if (Math.random() < 0.4) {
+        const k = pickCombatDropKey(bossInfo.tier || 5);
+        addInvItem(s, k, 1);
+        appendLog(`Found: ${itemLabel(k)} near boss lair.`);
+      }
+      return;
+    }
+  }
+
   if (kind === 'forage') {
     const inv = s.inventory || {};
     if (area.cost.ration && (inv.ration||0) < area.cost.ration) { appendLog('Lack rations'); return; }

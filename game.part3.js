@@ -565,10 +565,12 @@ function mobDef(mobIdOrIndex) {
   const name = `${mods[seed % mods.length]} ${species[(seed >>> 4) % species.length]}`;
 
   // Remoduled for player cap 700: base stats much higher for high tiers
-  // Old: 18+ tier*14 (~88 for tier5). New: scales quadratically to remain challenging at 700
   const baseHp = 28 + tier * 22 + tier * tier * 12 + (powerful ? 35 + tier * 8 : 0) + (seed % 18);
   const atk = 6 + tier * 6 + tier * tier * 2 + (powerful ? 8 + tier * 2 : 0) + (seed % 7);
   const acc = clamp(0.60 + tier * 0.04 + (powerful ? 0.06 : 0) + ((seed % 7) - 3) * 0.01, 0.55, 0.93);
+  // RecLevel for display - shows mob level as hard as level suggests
+  const expectedByTier = {1:1, 2:80, 3:200, 4:380, 5:580};
+  const recLevel = expectedByTier[tier] || (1 + (tier - 1) * 140);
 
   const requiresParty = tier >= 5 || (powerful && tier >= 4);
   const requiresPartySize = requiresParty ? 3 : (tier >= 4 ? 2 : 1);
@@ -579,6 +581,7 @@ function mobDef(mobIdOrIndex) {
     name,
     tier,
     powerful,
+    recLevel,
     maxHp: baseHp,
     atk,
     acc,
@@ -879,6 +882,11 @@ function executeCombatSkill(skillKey, ev) {
   const skillTier = Math.max(1, Math.floor(def.tier || 1));
   // Map skill tier to required level for spells: tier1=1, tier2=25, tier3=70, tier4=150, tier5=300, tier6=500, tier7=650
   const tierReq = {1:1, 2:25, 3:70, 4:150, 5:300, 6:500, 7:650}[skillTier] || (skillTier*100);
+  // Lock spells that don't meet requirement - as requested by user
+  if (playerLvl < tierReq) {
+    pushCombatLog(ev, `🔒 [SPELL LOCKED] ${def.label} Tier ${skillTier} requires Lv${tierReq}, you are Lv${playerLvl}. Locked till you meet requirement!`);
+    return false;
+  }
   const tierDiff = tierReq - playerLvl;
   let spellSuccessRate = 1.0;
   if (tierDiff >= 50) spellSuccessRate = 0.02;
@@ -1884,7 +1892,10 @@ function getEnemyRecLevelForCombat(ev) {
   let maxRec = 1;
   for (const e of ev.enemies) {
     if (!e) continue;
-    const rec = e.recLevel || e.level || (e.tier ? (1 + (e.tier-1)*140) : 1);
+    // Show mob level - if recLevel set use it, else compute from tier
+    const tier = Math.max(1, Math.floor(e.tier || 1));
+    const expectedByTier = {1:1, 2:80, 3:200, 4:380, 5:580};
+    const rec = e.recLevel || e.level || expectedByTier[tier] || (1 + (tier-1)*140);
     if (rec > maxRec) maxRec = rec;
   }
   return maxRec;
@@ -1897,6 +1908,7 @@ function getPlayerSuccessRateVsMobFarAbove() {
   if (!pending || pending.kind !== 'combat') return 1.0;
   const mobRec = getEnemyRecLevelForCombat(pending);
   const diff = mobRec - playerLvl;
+  if (diff >= 60) return 0.00; // 0% impossible - level 7 vs 141 (diff 134) impossible
   if (diff >= 50) return 0.02; // 2% success if 50+ levels above
   if (diff >= 30) return 0.05; // 5% success if 30+ levels above
   if (diff >= 20) return 0.15;
@@ -1911,16 +1923,22 @@ function partyAutoAttack(ev) {
   if (!enemies.length) return;
   const target = enemies[0];
 
-  // If mob far above player level, success rate drops to 5% or 2% as requested
+  // If mob far above player level, success rate drops to 5% or 2% - now 0% if 50+ above to make impossible
   const successRate = getPlayerSuccessRateVsMobFarAbove();
+  const mobRec = getEnemyRecLevelForCombat(ev);
+  const playerLvl = Math.max(1, Math.floor(state.level || 1));
+  // Show mob level as requested
+  // If mob is 50+ levels above, impossible to beat - 0% success
+  if (successRate <= 0.02 && (mobRec - playerLvl) >= 50) {
+    pushCombatLog(ev, `💀 [LEVEL GAP] Mob Lv${mobRec} far above you Lv${playerLvl}! You are ${mobRec - playerLvl} levels below - IMPOSSIBLE! Success rate 0% - you cannot damage it! Must flee or get higher level.`);
+    return;
+  }
   if (successRate < 1.0) {
     if (Math.random() > successRate) {
-      const mobRec = getEnemyRecLevelForCombat(ev);
-      const playerLvl = Math.max(1, Math.floor(state.level || 1));
-      pushCombatLog(ev, `💀 [LEVEL GAP] Mob Lv${mobRec} far above you Lv${playerLvl}! Success rate dropped to ${Math.round(successRate*100)}% - attack fumbles!`);
+      pushCombatLog(ev, `💀 [LEVEL GAP] Mob Lv${mobRec} far above you Lv${playerLvl}! Success rate dropped to ${Math.round(successRate*100)}% - attack fumbles! (Lv${mobRec} vs Lv${playerLvl})`);
       return;
     } else if (successRate <= 0.05) {
-      pushCombatLog(ev, `⚠️ Far above level! Only ${Math.round(successRate*100)}% success chance - you barely manage to strike!`);
+      pushCombatLog(ev, `⚠️ Far above level! Mob Lv${mobRec} vs you Lv${playerLvl} - Only ${Math.round(successRate*100)}% success chance - you barely manage to strike!`);
     }
   }
 

@@ -839,6 +839,36 @@ function genMissions(count) {
       gold,
     });
   }
+  // Boss missions with lairs and roads as requested - lowest boss 200 highest 800/900, mini bosses 70-90
+  const bossMissions = [
+    { id: "boss_mini_70", title: "Mini-Boss: Whispering Hollow Lv70", diff: "hard", rec: 70, faction: "Wilds", place: "mini_lair_70", desc: "Road to boss map via ruins/road - Boss: Hollow Warden" },
+    { id: "boss_mini_80", title: "Mini-Boss: Fog Mire Den Lv80", diff: "hard", rec: 80, faction: "Wilds", place: "mini_lair_80", desc: "Road via marsh/wilds - Boss: Mire Chieftain" },
+    { id: "boss_mini_90", title: "Mini-Boss: Sunken Chapel Lv90 (Highest Mini)", diff: "elite", rec: 90, faction: "Wilds", place: "mini_lair_90", desc: "Road via ruins/vault - Boss: Drowned Saint - highest mini boss" },
+    { id: "boss_200", title: "Boss: Bone King Crypt Lv200 (Lowest Boss)", diff: "elite", rec: 200, faction: "Crown", place: "boss_lair_200", desc: "Road via ruins/vault - Boss: Bone King - lowest boss legendary rank" },
+    { id: "boss_400", title: "Boss: Ashen Citadel Lv400", diff: "legendary", rec: 400, faction: "Crown", place: "boss_lair_400", desc: "Road via vault/wilds - Boss: Ash Tyrant" },
+    { id: "boss_600", title: "Boss: Void Scar Lv600", diff: "legendary", rec: 600, faction: "Guild", place: "boss_lair_600", desc: "Road via wilds - Boss: Void Harbinger" },
+    { id: "boss_800", title: "Boss: Stormpeak Throne Lv800", diff: "legendary", rec: 800, faction: "Guild", place: "boss_lair_800", desc: "Road via wilds - Boss: Storm Emperor - high boss" },
+    { id: "boss_900", title: "Boss: Sun Vault Core Lv900 (Highest Boss)", diff: "legendary", rec: 900, faction: "Guild", place: "boss_lair_900", desc: "Road via vault - Boss: Sun Vault Overlord - highest boss final" },
+  ];
+  for (const bm of bossMissions) {
+    const d = DIFFICULTY[bm.diff] || DIFFICULTY.elite;
+    const recLevel = bm.rec;
+    const xp = Math.max(200, Math.floor((d.baseXp + recLevel * d.xpPerLevel) * (1 + recLevel * 0.04)));
+    const gold = Math.max(100, Math.floor((d.baseGold + recLevel * d.goldPerLevel) * (1 + recLevel * 0.05)));
+    missions.push({
+      id: bm.id,
+      kind: "mission",
+      title: bm.title,
+      difficulty: bm.diff,
+      recLevel,
+      faction: bm.faction,
+      place: bm.place,
+      xp,
+      gold,
+      isBoss: true,
+      bossDesc: bm.desc,
+    });
+  }
   return missions;
 }
 
@@ -1038,6 +1068,31 @@ function missionTierForQuest(q) {
 }
 
 function pickMissionMobForQuest(s, q) {
+  // Boss missions have specific levels: 70,80,90,200,400,600,800,900
+  if (q && q.isBoss) {
+    const recLevel = Math.max(1, Math.floor(q.recLevel || 70));
+    // Map recLevel to tier for boss
+    const tier = recLevel < 100 ? 4 : 5;
+    const idx = (tier - 1) * 60 + 1 + Math.floor(Math.random() * 60);
+    const baseDef = mobDef(idx);
+    const boss = { ...baseDef };
+    boss.recLevel = recLevel;
+    boss.tier = tier;
+    boss.legendaryRank = recLevel >= 200;
+    boss.powerful = true;
+    boss.name = `${q.title.split(':')[1] ? q.title.split(':')[1].trim() : q.title} [${recLevel >= 200 ? 'LEGENDARY' : 'MINI-BOSS'} Lv${recLevel}]`;
+    // Scale boss to its level as requested: lowest boss 200, highest 800/900, mini 70-90
+    const hpMult = recLevel < 100 ? (3.5 + recLevel * 0.02) : (recLevel < 200 ? 5 + recLevel * 0.03 : recLevel < 400 ? 8 + recLevel * 0.04 : recLevel < 600 ? 12 + recLevel * 0.05 : 20 + recLevel * 0.06);
+    const atkMult = recLevel < 100 ? (2.2 + recLevel * 0.01) : (recLevel < 200 ? 3 + recLevel * 0.02 : recLevel < 400 ? 4 + recLevel * 0.025 : recLevel < 600 ? 5 + recLevel * 0.03 : 7 + recLevel * 0.035);
+    boss.maxHp = Math.max(300, Math.floor((baseDef.maxHp || 100) * hpMult + recLevel * 5));
+    boss.hp = boss.maxHp;
+    boss.atk = Math.max(20, Math.floor((baseDef.atk || 15) * atkMult + recLevel * 0.8));
+    boss.acc = 0.88;
+    if (recLevel >= 200) {
+      boss.bossLair = true;
+    }
+    return boss;
+  }
   const tier = missionTierForQuest(q);
   const p = partySize(s);
   const wantGroup = String(q?.difficulty || "").toLowerCase() === "legendary";
@@ -2919,8 +2974,28 @@ function renderPendingEvent() {
     const enemies = Array.isArray(ev.enemies) ? ev.enemies : [];
     const enemyLine = document.createElement("div");
     enemyLine.className = "hint";
-    enemyLine.textContent = enemies.map((e) => `${e.name}: ${Math.max(0, e.hp || 0)}/${e.maxHp}`).join(" | ");
+    enemyLine.textContent = enemies.map((e) => {
+      const lvl = e.recLevel || e.level || (e.tier ? (e.tier === 1 ? 1 : e.tier === 2 ? 80 : e.tier === 3 ? 200 : e.tier === 4 ? 380 : 580) : 1);
+      const tierInfo = e.tier ? ` T${e.tier}` : "";
+      const leg = e.legendaryRank ? " [LEGENDARY]" : (e.powerful ? " [Powerful]" : "");
+      return `${e.name} [Lv${lvl}${tierInfo}${leg}]: ${Math.max(0, e.hp || 0)}/${e.maxHp} HP, Atk ${e.atk || 0}`;
+    }).join(" | ");
     outputEl.appendChild(enemyLine);
+
+    // Show player vs mob level gap warning
+    try {
+      const playerLvl = Math.max(1, Math.floor(state?.level || 1));
+      const maxMobLvl = Math.max(...enemies.map(e => e.recLevel || e.level || 1));
+      const diff = maxMobLvl - playerLvl;
+      if (diff >= 30) {
+        const warn = document.createElement("div");
+        warn.className = "hint";
+        warn.style.color = diff >= 50 ? "#ff4d6d" : "#ff8a2b";
+        warn.style.fontWeight = "700";
+        warn.textContent = diff >= 50 ? `⚠️ EXTREME LEVEL GAP: Mob Lv${maxMobLvl} vs You Lv${playerLvl} (diff ${diff}) - Success rate 2% or 0% IMPOSSIBLE! Must flee or get higher level!` : `⚠️ Level Gap: Mob Lv${maxMobLvl} vs You Lv${playerLvl} (diff ${diff}) - Success dropped to ${diff>=50?2:5}%!`;
+        outputEl.appendChild(warn);
+      }
+    } catch(e) {}
 
     const logWrap = document.createElement("div");
     logWrap.className = "line";
@@ -2964,12 +3039,26 @@ function renderPendingEvent() {
 
       if (mode === "profession") {
         const buttons = [];
+        const playerLvl = Math.max(1, Math.floor(state?.level || 1));
         for (let i = 0; i < profSkills.length; i++) {
           const d = profSkills[i];
+          const tier = Math.max(1, Math.floor(d.tier || 1));
+          const tierReq = {1:1, 2:25, 3:70, 4:150, 5:300, 6:500, 7:650}[tier] || (tier*100);
+          const locked = playerLvl < tierReq;
+          const mobRec = (typeof getEnemyRecLevelForCombat === 'function') ? getEnemyRecLevelForCombat(ev) : 1;
+          const label = locked ? `${d.label} [LOCKED Req Lv${tierReq} You Lv${playerLvl}]` : `${d.label} [Lv${tierReq} vs Mob Lv${mobRec}]`;
           buttons.push({
-            label: d.label,
-            className: d.powerful ? "" : "secondary",
-            onChoose: () => combatPlayerAction(`skill:${d.key}`),
+            label: label,
+            className: locked ? "secondary" : (d.powerful ? "" : "secondary"),
+            disabled: locked,
+            onChoose: () => {
+              if (locked) {
+                pushCombatLog(ev, `🔒 Spell ${d.label} locked! Requires Level ${tierReq}, you are Lv${playerLvl}.`);
+                renderPendingEvent();
+                return;
+              }
+              combatPlayerAction(`skill:${d.key}`);
+            },
           });
         }
         showChoices([
@@ -2983,12 +3072,26 @@ function renderPendingEvent() {
 
       if (mode === "skill") {
         const buttons = [];
+        const playerLvl = Math.max(1, Math.floor(state?.level || 1));
         for (let i = 0; i < buildSkills.length; i++) {
           const d = buildSkills[i];
+          const tier = Math.max(1, Math.floor(d.tier || 1));
+          const tierReq = {1:1, 2:25, 3:70, 4:150, 5:300, 6:500, 7:650}[tier] || (tier*100);
+          const locked = playerLvl < tierReq;
+          const mobRec = (typeof getEnemyRecLevelForCombat === 'function') ? getEnemyRecLevelForCombat(ev) : 1;
+          const label = locked ? `${d.label} [LOCKED Req Lv${tierReq} You Lv${playerLvl}]` : `${d.label} [Lv${tierReq} vs Mob Lv${mobRec}]`;
           buttons.push({
-            label: d.label,
-            className: d.powerful ? "" : "secondary",
-            onChoose: () => combatPlayerAction(`skill:${d.key}`),
+            label: label,
+            className: locked ? "secondary" : (d.powerful ? "" : "secondary"),
+            disabled: locked,
+            onChoose: () => {
+              if (locked) {
+                pushCombatLog(ev, `🔒 Spell ${d.label} locked! Requires Level ${tierReq}, you are Lv${playerLvl}. Level up to unlock.`);
+                renderPendingEvent();
+                return;
+              }
+              combatPlayerAction(`skill:${d.key}`);
+            },
           });
         }
         showChoices([

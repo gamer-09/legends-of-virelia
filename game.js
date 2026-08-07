@@ -5560,10 +5560,12 @@ function mobDef(mobIdOrIndex) {
   const name = `${mods[seed % mods.length]} ${species[(seed >>> 4) % species.length]}`;
 
   // Remoduled for player cap 700: base stats much higher for high tiers
-  // Old: 18+ tier*14 (~88 for tier5). New: scales quadratically to remain challenging at 700
   const baseHp = 28 + tier * 22 + tier * tier * 12 + (powerful ? 35 + tier * 8 : 0) + (seed % 18);
   const atk = 6 + tier * 6 + tier * tier * 2 + (powerful ? 8 + tier * 2 : 0) + (seed % 7);
   const acc = clamp(0.60 + tier * 0.04 + (powerful ? 0.06 : 0) + ((seed % 7) - 3) * 0.01, 0.55, 0.93);
+  // RecLevel for display - shows mob level as hard as level suggests
+  const expectedByTier = {1:1, 2:80, 3:200, 4:380, 5:580};
+  const recLevel = expectedByTier[tier] || (1 + (tier - 1) * 140);
 
   const requiresParty = tier >= 5 || (powerful && tier >= 4);
   const requiresPartySize = requiresParty ? 3 : (tier >= 4 ? 2 : 1);
@@ -5574,6 +5576,7 @@ function mobDef(mobIdOrIndex) {
     name,
     tier,
     powerful,
+    recLevel,
     maxHp: baseHp,
     atk,
     acc,
@@ -5874,6 +5877,11 @@ function executeCombatSkill(skillKey, ev) {
   const skillTier = Math.max(1, Math.floor(def.tier || 1));
   // Map skill tier to required level for spells: tier1=1, tier2=25, tier3=70, tier4=150, tier5=300, tier6=500, tier7=650
   const tierReq = {1:1, 2:25, 3:70, 4:150, 5:300, 6:500, 7:650}[skillTier] || (skillTier*100);
+  // Lock spells that don't meet requirement - as requested by user
+  if (playerLvl < tierReq) {
+    pushCombatLog(ev, `🔒 [SPELL LOCKED] ${def.label} Tier ${skillTier} requires Lv${tierReq}, you are Lv${playerLvl}. Locked till you meet requirement!`);
+    return false;
+  }
   const tierDiff = tierReq - playerLvl;
   let spellSuccessRate = 1.0;
   if (tierDiff >= 50) spellSuccessRate = 0.02;
@@ -6879,7 +6887,10 @@ function getEnemyRecLevelForCombat(ev) {
   let maxRec = 1;
   for (const e of ev.enemies) {
     if (!e) continue;
-    const rec = e.recLevel || e.level || (e.tier ? (1 + (e.tier-1)*140) : 1);
+    // Show mob level - if recLevel set use it, else compute from tier
+    const tier = Math.max(1, Math.floor(e.tier || 1));
+    const expectedByTier = {1:1, 2:80, 3:200, 4:380, 5:580};
+    const rec = e.recLevel || e.level || expectedByTier[tier] || (1 + (tier-1)*140);
     if (rec > maxRec) maxRec = rec;
   }
   return maxRec;
@@ -6892,6 +6903,7 @@ function getPlayerSuccessRateVsMobFarAbove() {
   if (!pending || pending.kind !== 'combat') return 1.0;
   const mobRec = getEnemyRecLevelForCombat(pending);
   const diff = mobRec - playerLvl;
+  if (diff >= 60) return 0.00; // 0% impossible - level 7 vs 141 (diff 134) impossible
   if (diff >= 50) return 0.02; // 2% success if 50+ levels above
   if (diff >= 30) return 0.05; // 5% success if 30+ levels above
   if (diff >= 20) return 0.15;
@@ -6906,16 +6918,22 @@ function partyAutoAttack(ev) {
   if (!enemies.length) return;
   const target = enemies[0];
 
-  // If mob far above player level, success rate drops to 5% or 2% as requested
+  // If mob far above player level, success rate drops to 5% or 2% - now 0% if 50+ above to make impossible
   const successRate = getPlayerSuccessRateVsMobFarAbove();
+  const mobRec = getEnemyRecLevelForCombat(ev);
+  const playerLvl = Math.max(1, Math.floor(state.level || 1));
+  // Show mob level as requested
+  // If mob is 50+ levels above, impossible to beat - 0% success
+  if (successRate <= 0.02 && (mobRec - playerLvl) >= 50) {
+    pushCombatLog(ev, `💀 [LEVEL GAP] Mob Lv${mobRec} far above you Lv${playerLvl}! You are ${mobRec - playerLvl} levels below - IMPOSSIBLE! Success rate 0% - you cannot damage it! Must flee or get higher level.`);
+    return;
+  }
   if (successRate < 1.0) {
     if (Math.random() > successRate) {
-      const mobRec = getEnemyRecLevelForCombat(ev);
-      const playerLvl = Math.max(1, Math.floor(state.level || 1));
-      pushCombatLog(ev, `💀 [LEVEL GAP] Mob Lv${mobRec} far above you Lv${playerLvl}! Success rate dropped to ${Math.round(successRate*100)}% - attack fumbles!`);
+      pushCombatLog(ev, `💀 [LEVEL GAP] Mob Lv${mobRec} far above you Lv${playerLvl}! Success rate dropped to ${Math.round(successRate*100)}% - attack fumbles! (Lv${mobRec} vs Lv${playerLvl})`);
       return;
     } else if (successRate <= 0.05) {
-      pushCombatLog(ev, `⚠️ Far above level! Only ${Math.round(successRate*100)}% success chance - you barely manage to strike!`);
+      pushCombatLog(ev, `⚠️ Far above level! Mob Lv${mobRec} vs you Lv${playerLvl} - Only ${Math.round(successRate*100)}% success chance - you barely manage to strike!`);
     }
   }
 
@@ -8546,6 +8564,36 @@ function genMissions(count) {
       gold,
     });
   }
+  // Boss missions with lairs and roads as requested - lowest boss 200 highest 800/900, mini bosses 70-90
+  const bossMissions = [
+    { id: "boss_mini_70", title: "Mini-Boss: Whispering Hollow Lv70", diff: "hard", rec: 70, faction: "Wilds", place: "mini_lair_70", desc: "Road to boss map via ruins/road - Boss: Hollow Warden" },
+    { id: "boss_mini_80", title: "Mini-Boss: Fog Mire Den Lv80", diff: "hard", rec: 80, faction: "Wilds", place: "mini_lair_80", desc: "Road via marsh/wilds - Boss: Mire Chieftain" },
+    { id: "boss_mini_90", title: "Mini-Boss: Sunken Chapel Lv90 (Highest Mini)", diff: "elite", rec: 90, faction: "Wilds", place: "mini_lair_90", desc: "Road via ruins/vault - Boss: Drowned Saint - highest mini boss" },
+    { id: "boss_200", title: "Boss: Bone King Crypt Lv200 (Lowest Boss)", diff: "elite", rec: 200, faction: "Crown", place: "boss_lair_200", desc: "Road via ruins/vault - Boss: Bone King - lowest boss legendary rank" },
+    { id: "boss_400", title: "Boss: Ashen Citadel Lv400", diff: "legendary", rec: 400, faction: "Crown", place: "boss_lair_400", desc: "Road via vault/wilds - Boss: Ash Tyrant" },
+    { id: "boss_600", title: "Boss: Void Scar Lv600", diff: "legendary", rec: 600, faction: "Guild", place: "boss_lair_600", desc: "Road via wilds - Boss: Void Harbinger" },
+    { id: "boss_800", title: "Boss: Stormpeak Throne Lv800", diff: "legendary", rec: 800, faction: "Guild", place: "boss_lair_800", desc: "Road via wilds - Boss: Storm Emperor - high boss" },
+    { id: "boss_900", title: "Boss: Sun Vault Core Lv900 (Highest Boss)", diff: "legendary", rec: 900, faction: "Guild", place: "boss_lair_900", desc: "Road via vault - Boss: Sun Vault Overlord - highest boss final" },
+  ];
+  for (const bm of bossMissions) {
+    const d = DIFFICULTY[bm.diff] || DIFFICULTY.elite;
+    const recLevel = bm.rec;
+    const xp = Math.max(200, Math.floor((d.baseXp + recLevel * d.xpPerLevel) * (1 + recLevel * 0.04)));
+    const gold = Math.max(100, Math.floor((d.baseGold + recLevel * d.goldPerLevel) * (1 + recLevel * 0.05)));
+    missions.push({
+      id: bm.id,
+      kind: "mission",
+      title: bm.title,
+      difficulty: bm.diff,
+      recLevel,
+      faction: bm.faction,
+      place: bm.place,
+      xp,
+      gold,
+      isBoss: true,
+      bossDesc: bm.desc,
+    });
+  }
   return missions;
 }
 
@@ -8745,6 +8793,31 @@ function missionTierForQuest(q) {
 }
 
 function pickMissionMobForQuest(s, q) {
+  // Boss missions have specific levels: 70,80,90,200,400,600,800,900
+  if (q && q.isBoss) {
+    const recLevel = Math.max(1, Math.floor(q.recLevel || 70));
+    // Map recLevel to tier for boss
+    const tier = recLevel < 100 ? 4 : 5;
+    const idx = (tier - 1) * 60 + 1 + Math.floor(Math.random() * 60);
+    const baseDef = mobDef(idx);
+    const boss = { ...baseDef };
+    boss.recLevel = recLevel;
+    boss.tier = tier;
+    boss.legendaryRank = recLevel >= 200;
+    boss.powerful = true;
+    boss.name = `${q.title.split(':')[1] ? q.title.split(':')[1].trim() : q.title} [${recLevel >= 200 ? 'LEGENDARY' : 'MINI-BOSS'} Lv${recLevel}]`;
+    // Scale boss to its level as requested: lowest boss 200, highest 800/900, mini 70-90
+    const hpMult = recLevel < 100 ? (3.5 + recLevel * 0.02) : (recLevel < 200 ? 5 + recLevel * 0.03 : recLevel < 400 ? 8 + recLevel * 0.04 : recLevel < 600 ? 12 + recLevel * 0.05 : 20 + recLevel * 0.06);
+    const atkMult = recLevel < 100 ? (2.2 + recLevel * 0.01) : (recLevel < 200 ? 3 + recLevel * 0.02 : recLevel < 400 ? 4 + recLevel * 0.025 : recLevel < 600 ? 5 + recLevel * 0.03 : 7 + recLevel * 0.035);
+    boss.maxHp = Math.max(300, Math.floor((baseDef.maxHp || 100) * hpMult + recLevel * 5));
+    boss.hp = boss.maxHp;
+    boss.atk = Math.max(20, Math.floor((baseDef.atk || 15) * atkMult + recLevel * 0.8));
+    boss.acc = 0.88;
+    if (recLevel >= 200) {
+      boss.bossLair = true;
+    }
+    return boss;
+  }
   const tier = missionTierForQuest(q);
   const p = partySize(s);
   const wantGroup = String(q?.difficulty || "").toLowerCase() === "legendary";
@@ -10626,8 +10699,28 @@ function renderPendingEvent() {
     const enemies = Array.isArray(ev.enemies) ? ev.enemies : [];
     const enemyLine = document.createElement("div");
     enemyLine.className = "hint";
-    enemyLine.textContent = enemies.map((e) => `${e.name}: ${Math.max(0, e.hp || 0)}/${e.maxHp}`).join(" | ");
+    enemyLine.textContent = enemies.map((e) => {
+      const lvl = e.recLevel || e.level || (e.tier ? (e.tier === 1 ? 1 : e.tier === 2 ? 80 : e.tier === 3 ? 200 : e.tier === 4 ? 380 : 580) : 1);
+      const tierInfo = e.tier ? ` T${e.tier}` : "";
+      const leg = e.legendaryRank ? " [LEGENDARY]" : (e.powerful ? " [Powerful]" : "");
+      return `${e.name} [Lv${lvl}${tierInfo}${leg}]: ${Math.max(0, e.hp || 0)}/${e.maxHp} HP, Atk ${e.atk || 0}`;
+    }).join(" | ");
     outputEl.appendChild(enemyLine);
+
+    // Show player vs mob level gap warning
+    try {
+      const playerLvl = Math.max(1, Math.floor(state?.level || 1));
+      const maxMobLvl = Math.max(...enemies.map(e => e.recLevel || e.level || 1));
+      const diff = maxMobLvl - playerLvl;
+      if (diff >= 30) {
+        const warn = document.createElement("div");
+        warn.className = "hint";
+        warn.style.color = diff >= 50 ? "#ff4d6d" : "#ff8a2b";
+        warn.style.fontWeight = "700";
+        warn.textContent = diff >= 50 ? `⚠️ EXTREME LEVEL GAP: Mob Lv${maxMobLvl} vs You Lv${playerLvl} (diff ${diff}) - Success rate 2% or 0% IMPOSSIBLE! Must flee or get higher level!` : `⚠️ Level Gap: Mob Lv${maxMobLvl} vs You Lv${playerLvl} (diff ${diff}) - Success dropped to ${diff>=50?2:5}%!`;
+        outputEl.appendChild(warn);
+      }
+    } catch(e) {}
 
     const logWrap = document.createElement("div");
     logWrap.className = "line";
@@ -10671,12 +10764,26 @@ function renderPendingEvent() {
 
       if (mode === "profession") {
         const buttons = [];
+        const playerLvl = Math.max(1, Math.floor(state?.level || 1));
         for (let i = 0; i < profSkills.length; i++) {
           const d = profSkills[i];
+          const tier = Math.max(1, Math.floor(d.tier || 1));
+          const tierReq = {1:1, 2:25, 3:70, 4:150, 5:300, 6:500, 7:650}[tier] || (tier*100);
+          const locked = playerLvl < tierReq;
+          const mobRec = (typeof getEnemyRecLevelForCombat === 'function') ? getEnemyRecLevelForCombat(ev) : 1;
+          const label = locked ? `${d.label} [LOCKED Req Lv${tierReq} You Lv${playerLvl}]` : `${d.label} [Lv${tierReq} vs Mob Lv${mobRec}]`;
           buttons.push({
-            label: d.label,
-            className: d.powerful ? "" : "secondary",
-            onChoose: () => combatPlayerAction(`skill:${d.key}`),
+            label: label,
+            className: locked ? "secondary" : (d.powerful ? "" : "secondary"),
+            disabled: locked,
+            onChoose: () => {
+              if (locked) {
+                pushCombatLog(ev, `🔒 Spell ${d.label} locked! Requires Level ${tierReq}, you are Lv${playerLvl}.`);
+                renderPendingEvent();
+                return;
+              }
+              combatPlayerAction(`skill:${d.key}`);
+            },
           });
         }
         showChoices([
@@ -10690,12 +10797,26 @@ function renderPendingEvent() {
 
       if (mode === "skill") {
         const buttons = [];
+        const playerLvl = Math.max(1, Math.floor(state?.level || 1));
         for (let i = 0; i < buildSkills.length; i++) {
           const d = buildSkills[i];
+          const tier = Math.max(1, Math.floor(d.tier || 1));
+          const tierReq = {1:1, 2:25, 3:70, 4:150, 5:300, 6:500, 7:650}[tier] || (tier*100);
+          const locked = playerLvl < tierReq;
+          const mobRec = (typeof getEnemyRecLevelForCombat === 'function') ? getEnemyRecLevelForCombat(ev) : 1;
+          const label = locked ? `${d.label} [LOCKED Req Lv${tierReq} You Lv${playerLvl}]` : `${d.label} [Lv${tierReq} vs Mob Lv${mobRec}]`;
           buttons.push({
-            label: d.label,
-            className: d.powerful ? "" : "secondary",
-            onChoose: () => combatPlayerAction(`skill:${d.key}`),
+            label: label,
+            className: locked ? "secondary" : (d.powerful ? "" : "secondary"),
+            disabled: locked,
+            onChoose: () => {
+              if (locked) {
+                pushCombatLog(ev, `🔒 Spell ${d.label} locked! Requires Level ${tierReq}, you are Lv${playerLvl}. Level up to unlock.`);
+                renderPendingEvent();
+                return;
+              }
+              combatPlayerAction(`skill:${d.key}`);
+            },
           });
         }
         showChoices([
@@ -14433,16 +14554,37 @@ try {
 
 /* 6. FREE ROAM MAP */
 const V2_AREAS = {
-  streets: { label:'Low Streets', danger:1, minLevel:1, cost:{}, connects:['docks','market','gate','ruins'], desc:'Crowded, watchful. Rumors. Level 1+' },
-  docks: { label:'Dock Warrens', danger:2, minLevel:15, cost:{ waterskin:1 }, connects:['streets','marsh','market'], desc:'Salt, knives. Level 15+ recommended.' },
+  streets: { label:'Low Streets', danger:1, minLevel:1, cost:{}, connects:['docks','market','gate','ruins','mini_lair_70'], desc:'Crowded, watchful. Rumors. Level 1+ Road to mini-boss 70' },
+  docks: { label:'Dock Warrens', danger:2, minLevel:15, cost:{ waterskin:1 }, connects:['streets','marsh','market'], desc:'Salt, knives. Level 15+.' },
   market: { label:'High Market', danger:0, minLevel:1, cost:{}, connects:['streets','docks','gate','crossroads'], desc:'Safe-ish. Korg forge. Level 1+' },
-  gate: { label:'Virelia Gate', danger:1, minLevel:10, cost:{ waterskin:1 }, connects:['streets','road','market'], desc:'Leaving costs water. Level 10+ recommended.' },
-  road: { label:'Open Road', danger:2, minLevel:40, cost:{ ration:1, waterskin:1 }, connects:['gate','ruins','marsh'], desc:'Ambush chance. Level 40+ recommended.' },
-  ruins: { label:'Old Ruins', danger:3, minLevel:80, cost:{ torch:1, ration:1 }, connects:['road','streets','vault'], desc:'Needs torch else -20% accuracy. Hollow child. Level 80+ (Hard).' },
-  marsh: { label:'Fog Marsh', danger:3, minLevel:120, cost:{ ration:1, waterskin:1 }, connects:['road','docks','wilds'], desc:'High wilds. Level 120+ (Hard+).' },
-  vault: { label:'Sun Vault Approach', danger:4, minLevel:250, cost:{ torch:1, waterskin:1 }, connects:['ruins'], desc:'Shard may be found. Level 250+ (Elite).' },
-  wilds: { label:'Deep Wilds', danger:5, minLevel:400, cost:{ ration:2, waterskin:2, torch:1 }, connects:['marsh'], desc:'Most dangerous. Level 400+ (Legendary). Wilds+1 if camp no ritual.' },
-  crossroads: { label:'Crossroads', danger:0, minLevel:1, cost:{}, connects:['market','streets','road'], desc:'Hub. Level 1+' }
+  gate: { label:'Virelia Gate', danger:1, minLevel:10, cost:{ waterskin:1 }, connects:['streets','road','market'], desc:'Leaving costs water. Level 10+.' },
+  road: { label:'Open Road', danger:2, minLevel:40, cost:{ ration:1, waterskin:1 }, connects:['gate','ruins','marsh','mini_lair_70'], desc:'Ambush chance. Level 40+ Road to mini-boss 70.' },
+  ruins: { label:'Old Ruins', danger:3, minLevel:80, cost:{ torch:1, ration:1 }, connects:['road','streets','vault','mini_lair_70','mini_lair_90','boss_lair_200'], desc:'Needs torch else -20% accuracy. Hollow child. Level 80+ (Hard) Road to mini 70/90 and boss 200.' },
+  marsh: { label:'Fog Marsh', danger:3, minLevel:120, cost:{ ration:1, waterskin:1 }, connects:['road','docks','wilds','mini_lair_80'], desc:'High wilds. Level 120+ (Hard+) Road to mini 80.' },
+  vault: { label:'Sun Vault Approach', danger:4, minLevel:250, cost:{ torch:1, waterskin:1 }, connects:['ruins','mini_lair_90','boss_lair_200','boss_lair_400','boss_lair_900'], desc:'Shard may be found. Level 250+ (Elite) Road to mini 90 and bosses 200/400/900.' },
+  wilds: { label:'Deep Wilds', danger:5, minLevel:400, cost:{ ration:2, waterskin:2, torch:1 }, connects:['marsh','mini_lair_80','boss_lair_400','boss_lair_600','boss_lair_800'], desc:'Most dangerous. Level 400+ (Legendary) Road to mini 80 and bosses 400/600/800.' },
+  crossroads: { label:'Crossroads', danger:0, minLevel:1, cost:{}, connects:['market','streets','road'], desc:'Hub. Level 1+ Roads to all via free roam map.' },
+  // Mini-boss lairs - level 70-90 as requested - with lairs and roads
+  mini_lair_70: { label:'Whispering Hollow (Mini-Boss Lv70)', danger:3, minLevel:70, cost:{ torch:1, ration:1 }, connects:['ruins','road','streets'], desc:'Mini-boss lair. Level 70. Boss: Hollow Warden. Road to boss map via ruins/road.' },
+  mini_lair_80: { label:'Fog Mire Den (Mini-Boss Lv80)', danger:4, minLevel:80, cost:{ ration:1, waterskin:1, torch:1 }, connects:['marsh','wilds'], desc:'Mini-boss lair. Level 80. Boss: Mire Chieftain. Road via marsh/wilds.' },
+  mini_lair_90: { label:'Sunken Chapel (Mini-Boss Lv90)', danger:4, minLevel:90, cost:{ torch:1, ration:1, waterskin:1 }, connects:['ruins','vault'], desc:'Mini-boss lair. Level 90 (highest mini-boss). Boss: Drowned Saint. Road via ruins/vault.' },
+  // Boss lairs - lowest boss 200, highest 800-900 as requested - with lairs, missions, roads
+  boss_lair_200: { label:'Bone King Crypt (Boss Lv200)', danger:5, minLevel:200, cost:{ torch:2, ration:2, waterskin:1 }, connects:['ruins','vault'], desc:'Boss lair. Level 200 (lowest boss). Boss: Bone King. Legendary rank. Road to boss map via ruins/vault.' },
+  boss_lair_400: { label:'Ashen Citadel (Boss Lv400)', danger:5, minLevel:400, cost:{ torch:2, ration:2, waterskin:2 }, connects:['vault','wilds'], desc:'Boss lair. Level 400. Boss: Ash Tyrant. Legendary. Road via vault/wilds.' },
+  boss_lair_600: { label:'Void Scar (Boss Lv600)', danger:6, minLevel:600, cost:{ torch:3, ration:3, waterskin:3 }, connects:['wilds'], desc:'Boss lair. Level 600. Boss: Void Harbinger. Legendary. Road via wilds.' },
+  boss_lair_800: { label:'Stormpeak Throne (Boss Lv800)', danger:6, minLevel:800, cost:{ torch:3, ration:3, waterskin:3, ember_gem:1 }, connects:['wilds'], desc:'Boss lair. Level 800 (high boss). Boss: Storm Emperor. Legendary. Road via wilds.' },
+  boss_lair_900: { label:'Sun Vault Core (Boss Lv900 - Highest)', danger:7, minLevel:900, cost:{ torch:3, ration:3, waterskin:3, ember_gem:1, rune_shard:1 }, connects:['vault'], desc:'Boss lair. Level 900 (highest boss). Boss: Sun Vault Overlord. Legendary rank. Final. Road via vault.' },
+};
+
+const BOSS_DEFS = {
+  mini_70: { level:70, name:"Hollow Warden", tier:4, hpMult:3.5, atkMult:2.2, desc:"Mini-boss Lv70 - guards Whispering Hollow. Drops rare." },
+  mini_80: { level:80, name:"Mire Chieftain", tier:4, hpMult:4.0, atkMult:2.4, desc:"Mini-boss Lv80 - Fog Mire Den." },
+  mini_90: { level:90, name:"Drowned Saint", tier:5, hpMult:4.8, atkMult:2.8, desc:"Mini-boss Lv90 - highest mini boss, Sunken Chapel." },
+  boss_200: { level:200, name:"Bone King", tier:5, hpMult:7.5, atkMult:3.5, legendary:true, desc:"Boss Lv200 lowest boss - Bone King Crypt." },
+  boss_400: { level:400, name:"Ash Tyrant", tier:5, hpMult:12, atkMult:5.0, legendary:true, desc:"Boss Lv400 - Ashen Citadel." },
+  boss_600: { level:600, name:"Void Harbinger", tier:5, hpMult:18, atkMult:6.5, legendary:true, desc:"Boss Lv600 - Void Scar." },
+  boss_800: { level:800, name:"Storm Emperor", tier:5, hpMult:24, atkMult:8.0, legendary:true, desc:"Boss Lv800 high boss - Stormpeak Throne." },
+  boss_900: { level:900, name:"Sun Vault Overlord", tier:5, hpMult:30, atkMult:10.0, legendary:true, desc:"Boss Lv900 highest boss - Sun Vault Core, final." },
 };
 
 function ensureV2Roam(s) {
@@ -14586,6 +14728,66 @@ function roamActV2(s, kind) {
     if (typeof render === 'function') render();
     return;
   }
+  // Boss lair handling - lowest boss 200, highest 800/900, mini bosses 70-90
+  const bossKeyMap = {
+    'mini_lair_70': 'mini_70',
+    'mini_lair_80': 'mini_80',
+    'mini_lair_90': 'mini_90',
+    'boss_lair_200': 'boss_200',
+    'boss_lair_400': 'boss_400',
+    'boss_lair_600': 'boss_600',
+    'boss_lair_800': 'boss_800',
+    'boss_lair_900': 'boss_900'
+  };
+  const bossDefKey = bossKeyMap[area.key];
+  if (bossDefKey && BOSS_DEFS[bossDefKey]) {
+    const bossInfo = BOSS_DEFS[bossDefKey];
+    if (kind === 'explore') {
+      appendLog(`You enter ${area.label} - ${bossInfo.desc} Level ${bossInfo.level} ${bossInfo.legendary ? '[LEGENDARY]' : '[MINI-BOSS]'}!`);
+      // Check level requirement already done in travel, but also check here for spell lock etc
+      const playerLvl = Math.max(1, Math.floor(s.level || 1));
+      if (playerLvl + 20 < bossInfo.level) {
+        appendLog(`⚠️ Boss Lv${bossInfo.level} far above you Lv${playerLvl}! Success rate 2% or less! You should not be here!`);
+        addEffect("fear", 15000);
+      }
+      // Create boss combat
+      const tier = bossInfo.tier || 5;
+      const idx = (tier - 1) * 60 + 1 + Math.floor(Math.random() * 60);
+      const baseDef = mobDef(idx);
+      const boss = { ...baseDef };
+      boss.name = `${bossInfo.name} [${bossInfo.legendary ? 'LEGENDARY' : 'MINI-BOSS'} Lv${bossInfo.level}]`;
+      boss.recLevel = bossInfo.level;
+      boss.tier = tier;
+      boss.legendaryRank = !!bossInfo.legendary;
+      boss.powerful = true;
+      boss.maxHp = Math.max(500, Math.floor((baseDef.maxHp || 100) * bossInfo.hpMult + bossInfo.level * 8));
+      boss.hp = boss.maxHp;
+      boss.atk = Math.max(30, Math.floor((baseDef.atk || 20) * bossInfo.atkMult + bossInfo.level * 1.2));
+      boss.acc = 0.88;
+      boss.bossLair = bossDefKey;
+      // Create combat event
+      const ev = createCombatEvent(s, "boss", boss);
+      ev.encounterKind = "boss_lair";
+      ev.bossInfo = bossInfo;
+      ev.log = [
+        `🏰 Boss Lair: ${area.label} - ${bossInfo.name} Lv${bossInfo.level} ${bossInfo.legendary ? '[LEGENDARY]' : '[MINI-BOSS]'}`,
+        `${bossInfo.desc}`,
+        `Road to boss map: ${area.desc}`,
+        `If you are Lv${playerLvl} vs Lv${bossInfo.level}, success drops to 2-5% as requested!`,
+      ];
+      s.world.pendingEvent = ev;
+      return;
+    } else if (kind === 'forage') {
+      appendLog(`You search ${area.label} for loot near boss lair...`);
+      if (Math.random() < 0.4) {
+        const k = pickCombatDropKey(bossInfo.tier || 5);
+        addInvItem(s, k, 1);
+        appendLog(`Found: ${itemLabel(k)} near boss lair.`);
+      }
+      return;
+    }
+  }
+
   if (kind === 'forage') {
     const inv = s.inventory || {};
     if (area.cost.ration && (inv.ration||0) < area.cost.ration) { appendLog('Lack rations'); return; }
