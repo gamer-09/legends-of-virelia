@@ -2731,21 +2731,46 @@ function registerDestinations() {
 function createSkillTraderEvent(s) {
   const prof = s.character?.profession || "fighter";
   const build = s.character?.build || "balanced";
+  const playerLvl = Math.max(1, Math.floor(s.level || 1));
   const offers = [];
   const offerBases = new Set();
   const learned = s.skills?.learned || {};
+  // Tier requirement mapping as hard as level suggests
+  const tierReqMap = {1:1, 2:25, 3:70, 4:150, 5:300, 6:500, 7:650};
   let tries = 0;
-  while (offers.length < 6 && tries < 600) {
+  while (offers.length < 6 && tries < 1200) {
     tries += 1;
     const idx = 1 + Math.floor(Math.random() * SKILLS_PER_COMBO);
     const k = skillKeyFor(prof, build, idx);
     if (learned[k]) continue;
     if (offers.includes(k)) continue;
     if (typeof canLearnSkillByBaseLabel === "function" && !canLearnSkillByBaseLabel(s, k)) continue;
+    const def = skillDef(k);
+    const tier = Math.max(1, Math.floor(def.tier || 1));
+    const req = tierReqMap[tier] || tier*100;
+    // Only offer skills where requirement is not too far above player level - as hard as level suggests
+    // Allow up to 15 levels above current for challenge, but not 100+ above
+    if (req > playerLvl + 15) {
+      // 30% chance to still show high-tier as preview but locked? For now skip if too high
+      if (Math.random() < 0.7) continue;
+    }
     const base = (typeof skillFamilyIdForKey === "function") ? String(skillFamilyIdForKey(k) || "").trim() : "";
     if (base && offerBases.has(base)) continue;
     offers.push(k);
     if (base) offerBases.add(base);
+  }
+  // If not enough offers due to level filter, fill with lower tier
+  if (offers.length < 3) {
+    for (let i=1; i<=SKILLS_PER_COMBO && offers.length < 6; i++) {
+      const k = skillKeyFor(prof, build, i);
+      if (learned[k]) continue;
+      if (offers.includes(k)) continue;
+      const def = skillDef(k);
+      const tier = Math.max(1, Math.floor(def.tier || 1));
+      const req = tierReqMap[tier] || 1;
+      if (req > playerLvl) continue;
+      offers.push(k);
+    }
   }
   return {
     kind: "skillTrader",
@@ -2753,6 +2778,7 @@ function createSkillTraderEvent(s) {
     profession: prof,
     build,
     offers,
+    playerLevel: playerLvl,
   };
 }
 
@@ -3255,17 +3281,51 @@ function renderPendingEvent() {
 
   const header = document.createElement("div");
   header.className = "line";
-  header.textContent = "A Skill Trader appears";
+  header.textContent = `A Skill Trader appears [Player Lv${state.level || 1}] - Offers scaled to your level as hard as level suggests`;
   outputEl.appendChild(header);
 
   const hint = document.createElement("div");
   hint.className = "hint";
-  hint.textContent = `A masked trader offers techniques suited to your path. You can spend Skill Points to learn them. Skill Points: ${state.skillPoints || 0}`;
+  hint.textContent = `A masked trader offers techniques suited to your path. You can spend Skill Points to learn them. Skill Points: ${state.skillPoints || 0} | Filter by Tier below. Tier req: T1=Lv1, T2=Lv25, T3=70, T4=150, T5=300, T6=500, T7=650. Locked skills show requirement.`;
   outputEl.appendChild(hint);
+
+  // Tier filter for trader
+  const filterRow = document.createElement("div");
+  filterRow.className = "row";
+  const tierLabel = document.createElement("div");
+  tierLabel.className = "hint";
+  tierLabel.textContent = "Filter Tier";
+  const tierSel = document.createElement("select");
+  tierSel.style.minWidth = "110px";
+  const tierOpts = [
+    { v: "all", t: "All Tiers" },
+    { v: "1", t: "Tier 1 (Lv1)" },
+    { v: "2", t: "Tier 2 (Lv25)" },
+    { v: "3", t: "Tier 3 (Lv70)" },
+    { v: "4", t: "Tier 4 (Lv150)" },
+    { v: "5", t: "Tier 5 (Lv300)" },
+    { v: "6", t: "Tier 6 (Lv500)" },
+    { v: "7", t: "Tier 7 (Lv650)" },
+  ];
+  for (const o of tierOpts) {
+    const opt = document.createElement("option");
+    opt.value = o.v;
+    opt.textContent = o.t;
+    tierSel.appendChild(opt);
+  }
+  tierSel.value = String(ev.tierFilter || "all");
+  tierSel.addEventListener("change", () => {
+    ev.tierFilter = String(tierSel.value || "all");
+    renderPendingEvent();
+  });
+  filterRow.appendChild(tierLabel);
+  filterRow.appendChild(tierSel);
+  outputEl.appendChild(filterRow);
 
   const list = document.createElement("div");
   list.className = "skillList";
   const seenBases = new Set();
+  const tierFilter = String(ev.tierFilter || "all");
   for (const k of ev.offers || []) {
     if (!k) continue;
     if (typeof canLearnSkillByBaseLabel === "function" && !canLearnSkillByBaseLabel(state, k)) continue;
@@ -3284,7 +3344,12 @@ function renderPendingEvent() {
     title.textContent = def.label;
     const meta = document.createElement("div");
     meta.className = "skillMeta";
-    meta.textContent = `${titleCaseWord(def.focus)} • Tier ${def.tier}${def.powerful ? " • Powerful" : ""} • Cost ${skillPointCost(def)} SP`;
+    const tierReqMap = {1:1, 2:25, 3:70, 4:150, 5:300, 6:500, 7:650};
+    const reqLvl = tierReqMap[def.tier] || def.tier * 100;
+    const playerLvl = Math.max(1, Math.floor(state.level || 1));
+    const locked = playerLvl < reqLvl;
+    meta.textContent = `${titleCaseWord(def.focus)} • Tier ${def.tier} (Req Lv${reqLvl})${def.powerful ? " • Powerful" : ""} • Cost ${skillPointCost(def)} SP${locked ? ` • LOCKED (You Lv${playerLvl})` : ""}`;
+    if (locked) meta.style.color = "#ff8a8a";
     left.appendChild(title);
     left.appendChild(meta);
 
@@ -3302,9 +3367,9 @@ function renderPendingEvent() {
     });
 
     const buy = document.createElement("button");
-    buy.textContent = "Learn";
+    buy.textContent = locked ? `Locked Req Lv${reqLvl}` : "Learn";
     const canLearn = (typeof canLearnSkillByBaseLabel === "function") ? canLearnSkillByBaseLabel(state, def.key) : true;
-    buy.disabled = (state.skillPoints || 0) < skillPointCost(def) || !!state.skills.learned[def.key] || !canLearn;
+    buy.disabled = locked || (state.skillPoints || 0) < skillPointCost(def) || !!state.skills.learned[def.key] || !canLearn;
     buy.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
