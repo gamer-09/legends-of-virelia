@@ -13131,7 +13131,7 @@ function normalizeState(s) {
   if (!s.skills.sources || typeof s.skills.sources !== "object") s.skills.sources = {};
   for (const k of Object.keys(s.skills.learned)) {
     if (!s.skills.learned[k]) continue;
-    s.skills.learned[k] = Math.min(7, Math.max(1, Math.floor(s.skills.learned[k] || 1)));
+    s.skills.learned[k] = Math.min(15, Math.max(1, Math.floor(s.skills.learned[k] || 1))); // Remoduled for 700 cap: rank max 15 not 7
   }
   if (typeof s.skills.page !== "number") s.skills.page = 0;
   if (!Array.isArray(s.skills.draftQueue)) s.skills.draftQueue = [];
@@ -13802,12 +13802,16 @@ function upgradeLearnedSkill(skillKey) {
   if (!k) return false;
   if (!state.skills?.learned?.[k]) return false;
   const curRank = Math.max(1, Math.floor(state.skills.learned[k] || 1));
-  if (curRank >= 7) return false;
+  const MAX_RANK = 15; // Remoduled for 700 cap (was 7)
+  if (curRank >= MAX_RANK) return false;
   const def = skillDef(k);
-  const cost = skillPointCost(def);
+  // Cost scales with rank for high levels: base tier + rank*0.5
+  const baseCost = skillPointCost(def);
+  const rankMult = 1 + Math.floor(curRank / 3) * 0.5;
+  const cost = Math.max(1, Math.floor(baseCost * rankMult));
   if ((state.skillPoints || 0) < cost) return false;
   state.skillPoints -= cost;
-  state.skills.learned[k] = Math.min(7, Math.max(1, Math.floor(state.skills.learned[k] || 1)) + 1);
+  state.skills.learned[k] = Math.min(MAX_RANK, Math.max(1, Math.floor(state.skills.learned[k] || 1)) + 1);
   autoSave();
   return true;
 }
@@ -13989,17 +13993,21 @@ function showSkills(msg) {
     const btnUpgrade = document.createElement("button");
     btnUpgrade.textContent = "Upgrade";
     btnUpgrade.style.display = learned ? "inline-block" : "none";
-    const upCost = skillPointCost(def);
-    const atCap = learned && Math.max(1, rank) >= 7;
+    const MAX_RANK = 15;
+    const upCostBase = skillPointCost(def);
+    const rankMult = 1 + Math.floor(Math.max(1, rank) / 3) * 0.5;
+    const upCost = Math.max(1, Math.floor(upCostBase * rankMult));
+    const atCap = learned && Math.max(1, rank) >= MAX_RANK;
     btnUpgrade.title = atCap
-      ? "Max level reached (Lv 7). Find a higher-tier version from a Skill Trader or level-up reward."
-      : `Upgrade this skill (-${upCost} Skill Points)`;
+      ? `Max level reached (Lv ${MAX_RANK}). Find a higher-tier version from a Skill Trader or level-up reward. (Remoduled for 700 cap)`
+      : `Upgrade this skill (-${upCost} Skill Points) - Rank ${rank} -> ${Math.min(MAX_RANK, rank+1)}`;
     btnUpgrade.disabled = !learned || atCap || (state.skillPoints || 0) < upCost;
     btnUpgrade.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
-      if (Math.max(1, Math.floor(state.skills.learned[def.key] || 1)) >= 7) {
-        showSkills("Max level reached (Lv 7). Find a higher-tier version from a Skill Trader or level-up reward.");
+      const MAX_RANK = 15;
+      if (Math.max(1, Math.floor(state.skills.learned[def.key] || 1)) >= MAX_RANK) {
+        showSkills(`Max level reached (Lv ${MAX_RANK}). Find a higher-tier version from a Skill Trader or level-up reward.`);
         return;
       }
       const ok = upgradeLearnedSkill(def.key);
