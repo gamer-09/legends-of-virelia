@@ -8115,7 +8115,19 @@ function pruneExpiredEffects() {
     renderEffectsUi();
     renderStats();
     renderLog();
+    try { if (typeof syncSidebarButtons === 'function') syncSidebarButtons(); } catch(e) {}
+    try { if (typeof renderQuestList === 'function') renderQuestList(); } catch(e) {}
     autoSave();
+    // If rested expired, need full render to re-enable middle panel buttons
+    try {
+      const hasRestedNow = typeof hasEffectOnState === 'function' && state && hasEffectOnState(state, "rested");
+      if (!hasRestedNow) {
+        // Check if we previously had rested by looking at expired list
+        if (expired.includes("rested") && typeof render === 'function') {
+          render();
+        }
+      }
+    } catch(e) {}
   }
 }
 
@@ -14240,9 +14252,31 @@ function init() {
   renderEffectsUi();
   setInterval(() => {
     if (!state) return;
+    const hadRested = (typeof hasEffectOnState === 'function' && hasEffectOnState(state, "rested"));
+    const hadAnyExpired = (() => {
+      try {
+        const before = Object.keys(state.effects || {}).length;
+        return before;
+      } catch { return 0; }
+    })();
     pruneExpiredEffects();
     tickEffects();
     renderEffectsUi();
+    try { if (typeof syncSidebarButtons === 'function') syncSidebarButtons(); } catch(e) {}
+    // If rested expired, re-render full UI to re-enable middle panel and quest board
+    try {
+      const hasRestedNow = (typeof hasEffectOnState === 'function' && hasEffectOnState(state, "rested"));
+      if (hadRested && !hasRestedNow) {
+        if (typeof render === 'function') render();
+        else if (typeof renderQuestList === 'function') renderQuestList();
+      } else {
+        // Keep quest board updated even without full render
+        if (typeof renderQuestList === 'function') {
+          // Only re-render quest list if not in combat to avoid flicker
+          if (!state.world?.pendingEvent) renderQuestList();
+        }
+      }
+    } catch(e) {}
   }, 500);
 }
 
