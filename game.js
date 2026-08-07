@@ -7888,6 +7888,12 @@ function addEffect(key, durationMs) {
   }
   if (!wasActive) playEffectSfx(key, "apply");
   renderEffectsUi();
+  try { if (typeof syncSidebarButtons === 'function') syncSidebarButtons(); } catch(e) {}
+  // If effect is rested or any that freezes actions, re-render quest board and choices immediately
+  if (key === "rested") {
+    try { if (typeof renderQuestList === 'function') renderQuestList(); } catch(e) {}
+    try { if (typeof render === 'function' && !hasEffectOnState(state, "rested")) render(); } catch(e) {}
+  }
 }
 
 function clearEffect(key) {
@@ -7896,6 +7902,12 @@ function clearEffect(key) {
   delete state.effects[key];
   if (had) playEffectSfx(key, "clear");
   renderEffectsUi();
+  try { if (typeof syncSidebarButtons === 'function') syncSidebarButtons(); } catch(e) {}
+  try { if (typeof renderQuestList === 'function') renderQuestList(); } catch(e) {}
+  // If cleared effect was rested, re-render full UI to re-enable all frozen buttons
+  if (key === "rested") {
+    try { if (typeof render === 'function') render(); } catch(e) {}
+  }
 }
 
 function pauseAllEffects(s) {
