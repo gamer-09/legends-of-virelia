@@ -424,9 +424,20 @@ function equipmentBonusForItem(key) {
   if (!group) return empty;
 
   const rank = marketRankForItem(k);
-  const tier = clamp(Math.floor(rank?.tier || 0), 0, 4);
-  const power = 1 + tier;
+  const tier = clamp(Math.floor(rank?.tier || 0), 0, 4); // 0 Common, 1 Uncommon, 2 Rare, 3 Epic, 4 Legendary
   const h = hashString(k);
+
+  // Tier scaling - items as strong as their tier (user request)
+  // Common (0): weak, Uncommon (1): moderate, Rare (2): strong, Epic (3): very strong, Legendary (4): godlike
+  const tierStats = [
+    { stat: 1, hp: 3, mana: 2, flat: 1, mult: 0.06, red: 0.06 }, // Common
+    { stat: 3, hp: 8, mana: 6, flat: 4, mult: 0.18, red: 0.12 }, // Uncommon
+    { stat: 6, hp: 18, mana: 14, flat: 10, mult: 0.38, red: 0.20 }, // Rare
+    { stat: 11, hp: 32, mana: 26, flat: 20, mult: 0.72, red: 0.30 }, // Epic
+    { stat: 18, hp: 58, mana: 44, flat: 36, mult: 1.25, red: 0.45 }, // Legendary
+  ];
+  const t = tierStats[tier] || tierStats[0];
+  const power = tier + 1;
 
   const out = JSON.parse(JSON.stringify(empty));
   const bump = (stat, amt) => {
@@ -436,42 +447,44 @@ function equipmentBonusForItem(key) {
   const kk = k.toLowerCase();
   if (group === "weapon") {
     const primary = /(staff|wand)/i.test(kk) ? "arcana" : (/(dagger|bow|crossbow)/i.test(kk) ? "cunning" : "strength");
-    // Remoduled for 700 cap: weapon gives more stats and damage
-    bump(primary, 1 + Math.floor(power * 0.9) + (h % 3) + Math.floor(power / 2));
-    bump("strength", /(staff|wand)/i.test(kk) ? Math.floor(power * 0.4) : Math.floor(power * 0.2));
-    bump("cunning", /(dagger|bow|crossbow)/i.test(kk) ? Math.floor(power * 0.4) : (h % 2));
-    // Higher damage multipliers for high tier (power 0-4, but for 700 cap we want up to 0.45)
-    out.dmgMult = 1 + clamp(0.05 * power + ((h % 7) * 0.015) + power * 0.02, 0.05, 0.48);
-    out.dmgFlat = 2 + power * 2 + (h % 5) + Math.floor(power * 1.2);
+    // Tier-based strong scaling
+    bump(primary, t.stat + Math.floor(power * 0.6) + (h % 3));
+    bump("strength", /(staff|wand)/i.test(kk) ? Math.floor(t.stat * 0.3) : Math.floor(t.stat * 0.2));
+    bump("cunning", /(dagger|bow|crossbow)/i.test(kk) ? Math.floor(t.stat * 0.4) : (h % 2));
+    out.dmgMult = 1 + t.mult + ((h % 10) * 0.01) + power * 0.02;
+    out.dmgFlat = t.flat + power * 2 + (h % 6) + Math.floor(t.stat * 0.5);
     if (/(staff|wand)/i.test(kk)) {
-      out.maxMana = 2 + power * 2 + (h % 6);
-      // Magic damage bonus for staff/wand
-      out.dmgMult += 0.03 * power;
+      out.maxMana = t.mana + power * 2 + (h % 8);
+      out.dmgMult += 0.05 * power; // extra magic dmg for staff/wand
+    } else {
+      out.maxHp = Math.floor(t.hp * 0.3);
     }
     return out;
   }
 
   if (group === "armor") {
-    bump("resilience", 2 + Math.floor(power * 1.1) + (h % 3));
-    out.maxHp = 5 + power * 8 + (h % 12) + Math.floor(power * 1.5);
-    const red = clamp(0.05 * power + ((h % 5) * 0.015) + power * 0.015, 0.06, 0.38);
+    bump("resilience", t.stat + Math.floor(power * 0.8) + (h % 3));
+    out.maxHp = t.hp + power * 6 + (h % 15) + Math.floor(t.stat * 1.2);
+    const red = clamp(t.red + ((h % 5) * 0.01) + power * 0.01, 0.06, 0.55);
     out.damageTakenMult = 1 - red;
-    if (/(cloak|boots)/i.test(kk)) bump("cunning", Math.floor(power * 0.6));
-    if (/helm/i.test(kk)) bump("arcana", Math.floor(power * 0.5));
+    if (/(cloak|boots)/i.test(kk)) bump("cunning", Math.floor(t.stat * 0.5));
+    if (/helm/i.test(kk)) bump("arcana", Math.floor(t.stat * 0.4));
+    if (/plate|aegis/i.test(kk)) out.maxHp += Math.floor(t.hp * 0.3);
     return out;
   }
 
+  // Accessories - tier strong
   const pool = ["strength", "cunning", "arcana", "resilience"];
   const a = pool[h % pool.length];
   const b = pool[(h >>> 3) % pool.length];
-  bump(a, 1 + Math.floor(power * 0.6));
-  if (b !== a) bump(b, Math.floor(power * 0.45));
-  if (/(ring_|pendant|circlet|sigil|chronicle|lantern_of_)/i.test(kk)) out.maxMana = 1 + power * 2 + (h % 5);
-  else if (/(amulet_|medallion|totem|band|crown_)/i.test(kk)) out.maxHp = 1 + power * 2 + (h % 5);
+  bump(a, t.stat + Math.floor(power * 0.5));
+  if (b !== a) bump(b, Math.floor(t.stat * 0.6));
+  if (/(ring_|pendant|circlet|sigil|chronicle|lantern_of_)/i.test(kk)) out.maxMana = t.mana + power * 2 + (h % 8);
+  else if (/(amulet_|medallion|totem|band|crown_)/i.test(kk)) out.maxHp = t.hp + power * 2 + (h % 8);
   if (/(amulet_|medallion|totem|crown_)/i.test(kk)) {
-    out.damageTakenMult = 1 - clamp(0.01 * power + ((h % 3) * 0.005), 0.01, 0.06);
+    out.damageTakenMult = 1 - clamp(t.red * 0.35 + ((h % 3) * 0.01), 0.03, 0.22);
   }
-  if (/(ring_|sigil|chronicle)/i.test(kk)) out.dmgMult = 1 + clamp(0.01 * power + ((h % 3) * 0.01), 0.01, 0.06);
+  if (/(ring_|sigil|chronicle)/i.test(kk)) out.dmgMult = 1 + clamp(t.mult * 0.4 + ((h % 3) * 0.01), 0.04, 0.35);
   return out;
 }
 
@@ -753,32 +766,32 @@ const MARKET_LEGENDARY_KEYS = new Set([
 function marketRankForItem(key) {
   const k = String(key || "").trim();
   if (!k) return { tier: 0, rank: "Common", badge: "easy", mult: 1 };
-  if (MARKET_LEGENDARY_KEYS.has(k)) return { tier: 4, rank: "Legendary", badge: "legendary", mult: 8.8 };
+  if (MARKET_LEGENDARY_KEYS.has(k)) return { tier: 4, rank: "Legendary", badge: "legendary", mult: 14.0 }; // Legendary very strong as tier suggests
   const def = itemDef(k);
   const kk = k.toLowerCase();
 
   if (kk.startsWith("loc_")) {
-    return { tier: 1, rank: "Curio", badge: "normal", mult: 1.6 };
+    return { tier: 1, rank: "Curio", badge: "normal", mult: 2.0 };
   }
 
   if (def.consumable) {
     if (kk.startsWith("consumable_")) return { tier: 0, rank: "Common", badge: "easy", mult: 1.0 };
     if (/(phoenix|titanblood|sunfire|voidsalt|wyrmhide|aether|stormseed|mindglass|shadowstep|ironbark)/i.test(kk)) {
-      return { tier: 3, rank: "Epic", badge: "elite", mult: 4.6 };
+      return { tier: 3, rank: "Epic", badge: "elite", mult: 6.5 }; // Epic strong
     }
-    return { tier: 1, rank: "Uncommon", badge: "normal", mult: 1.4 };
+    return { tier: 1, rank: "Uncommon", badge: "normal", mult: 1.8 };
   }
 
   if (/(^ring_|^amulet_|^sigil_|^crown_|chronicle|lantern_of_|_totem$|_pendant$|_circlet$|_medallion$|_band$|mirror_charm)/i.test(kk)) {
-    return { tier: 3, rank: "Epic", badge: "elite", mult: 4.6 };
+    return { tier: 3, rank: "Epic", badge: "elite", mult: 6.5 };
   }
   if (/(plate|dragonscale|stormguard|shadowweave|runebound|arcane_focus|sunstorm|moonlit|starfall|embercore|wyrmfang|reaver|frostbite|whispersteel)/i.test(kk)) {
-    return { tier: 2, rank: "Rare", badge: "hard", mult: 3.6 };
+    return { tier: 2, rank: "Rare", badge: "hard", mult: 3.8 };
   }
   if (equipmentSlotGroupForItem(k)) {
-    return { tier: 1, rank: "Uncommon", badge: "normal", mult: 1.6 };
+    return { tier: 1, rank: "Uncommon", badge: "normal", mult: 1.8 };
   }
-  return { tier: 0, rank: "Common", badge: "easy", mult: 1.1 };
+  return { tier: 0, rank: "Common", badge: "easy", mult: 1.0 };
 }
 
 let marketStockCache = null;
@@ -882,8 +895,9 @@ function marketPriceForItem(key) {
     kindMult = 1.15;
   }
 
-  const minByTier = { 0: 3, 1: 12, 2: 160, 3: 260, 4: 450 };
-  const maxByTier = { 0: 200, 1: 260, 2: 520, 3: 820, 4: 1000 };
+  // Items as strong as their tier - price reflects power
+  const minByTier = { 0: 5, 1: 30, 2: 180, 3: 400, 4: 900 };
+  const maxByTier = { 0: 150, 1: 400, 2: 1200, 3: 3500, 4: 8000 };
   const min = (typeof minByTier[rank.tier] === "number") ? minByTier[rank.tier] : 3;
   const max = (typeof maxByTier[rank.tier] === "number") ? maxByTier[rank.tier] : 1000;
 
