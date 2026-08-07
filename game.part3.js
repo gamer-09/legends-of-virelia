@@ -1954,8 +1954,7 @@ function partyAutoAttack(ev) {
   if (hasEffectOnState(state, "aether")) boost *= 1.06;
   if (hasEffectOnState(state, "well_fed")) boost *= 1.04;
   if (hasEffectOnState(state, "cursed")) boost *= 0.88;
-  // Level scaling for attack power - at 700 cap, add level bonus
-  const playerLvl = Math.max(1, Math.floor(state?.level || 1));
+  // Level scaling for attack power - at 700 cap, add level bonus (using already defined playerLvl)
   if (playerLvl > 100) boost *= (1 + (playerLvl - 100) * 0.002); // +0.2% per level beyond 100, ~120% extra at 700
   if (playerLvl > 300) boost *= (1 + (playerLvl - 300) * 0.001); // extra
   // New debuffs reduce damage
